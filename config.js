@@ -1,0 +1,76 @@
+/* 默认桌面配置。结构保持为纯 JSON 数据，方便增删快捷方式。 */
+window.DEFAULT_DESKTOP_CONFIG = {
+  version: 1,
+  wallpaper: "sunny",
+  customWallpaper: "",
+  city: { name: "北京", latitude: 39.9, longitude: 116.4 },
+  pages: [
+    { id: "home", name: "首页", eyebrow: "GOOD DAY, EVERY DAY", title: "今天也要开心呀！" },
+    { id: "personal", name: "个人 · 学习", eyebrow: "GROW AT YOUR PACE", title: "慢慢来，也很棒。" },
+    { id: "media", name: "影音娱乐", eyebrow: "PLAY & RELAX", title: "留一点时间给快乐。" },
+    { id: "tools", name: "工具 · 开发", eyebrow: "MAKE SOMETHING NEW", title: "灵感，现在开始。" }
+  ],
+  apps: [
+    { id: "chatgpt", name: "ChatGPT", url: "https://chatgpt.com", icon: "✳", color: "#263f38", page: "home", category: "常用", dock: true },
+    { id: "github", name: "GitHub", url: "https://github.com", icon: "GH", color: "#252b3a", page: "home", category: "开发", dock: true },
+    { id: "bilibili", name: "B站", url: "https://www.bilibili.com", icon: "▣", color: "#ee8fa7", page: "home", category: "影音", dock: true },
+    { id: "google", name: "Google", url: "https://www.google.com", icon: "G", color: "#fbf7ed", page: "home", category: "搜索", dock: true },
+    { id: "notion", name: "Notion", url: "https://www.notion.so", icon: "N", color: "#f8f7f2", page: "home", category: "效率", dock: true },
+    { id: "youtube", name: "YouTube", url: "https://www.youtube.com", icon: "▶", color: "#f16b64", page: "home", category: "影音" },
+    { id: "zhihu", name: "知乎", url: "https://www.zhihu.com", icon: "知", color: "#448af0", page: "home", category: "阅读" },
+    { id: "email", name: "邮箱", url: "https://mail.google.com", icon: "✉", color: "#f8a678", page: "home", category: "效率", dock: true },
+    { id: "class", name: "课程平台", url: "https://www.xuetangx.com", icon: "▤", color: "#678ec2", page: "personal", category: "学习" },
+    { id: "library", name: "图书馆", url: "https://www.worldcat.org", icon: "▥", color: "#b78859", page: "personal", category: "学习" },
+    { id: "drive", name: "网盘", url: "https://drive.google.com", icon: "△", color: "#7aaa8e", page: "personal", category: "学习", dock: true },
+    { id: "translate", name: "翻译", url: "https://translate.google.com", icon: "文", color: "#83aadc", page: "personal", category: "学习" },
+    { id: "scholar", name: "学术资源", url: "https://scholar.google.com", icon: "✒", color: "#626fb1", page: "personal", category: "学习" },
+    { id: "wolfram", name: "公式计算", url: "https://www.wolframalpha.com", icon: "∑", color: "#d97669", page: "personal", category: "学习" },
+    { id: "todoapp", name: "ToDo", url: "https://todo.microsoft.com", icon: "✓", color: "#f0bc69", page: "personal", category: "效率" },
+    { id: "calendarapp", name: "日历", url: "https://calendar.google.com", icon: "31", color: "#f2f1e8", page: "personal", category: "效率" },
+    { id: "netflix", name: "Netflix", url: "https://www.netflix.com", icon: "N", color: "#20212c", page: "media", category: "视频" },
+    { id: "tencent", name: "腾讯视频", url: "https://v.qq.com", icon: "▶", color: "#57b781", page: "media", category: "视频" },
+    { id: "iqiyi", name: "爱奇艺", url: "https://www.iqiyi.com", icon: "iQI", color: "#80b74f", page: "media", category: "视频" },
+    { id: "spotify", name: "Spotify", url: "https://open.spotify.com", icon: "♫", color: "#54b575", page: "media", category: "音乐" },
+    { id: "music", name: "音乐", url: "https://music.163.com", icon: "♫", color: "#e97e7f", page: "media", category: "音乐" },
+    { id: "steam", name: "游戏", url: "https://store.steampowered.com", icon: "✦", color: "#354b6d", page: "media", category: "游戏" },
+    { id: "manga", name: "漫画", url: "https://manga.bilibili.com", icon: "漫", color: "#efab96", page: "media", category: "阅读" },
+    { id: "shopping", name: "购物", url: "https://www.taobao.com", icon: "包", color: "#f68d5c", page: "media", category: "生活" },
+    { id: "vscode", name: "VS Code", url: "https://vscode.dev", icon: "⌘", color: "#408ed4", page: "tools", category: "开发", dock: true },
+    { id: "gitlab", name: "GitLab", url: "https://gitlab.com", icon: "◆", color: "#f5a65d", page: "tools", category: "开发" },
+    { id: "gitee", name: "Gitee", url: "https://gitee.com", icon: "G", color: "#d65f5e", page: "tools", category: "开发" },
+    { id: "gitcode", name: "GitCode", url: "https://gitcode.com", icon: "GC", color: "#586bc2", page: "tools", category: "开发" },
+    { id: "cloudflare", name: "Cloudflare", url: "https://dash.cloudflare.com", icon: "☁", color: "#efa965", page: "tools", category: "开发" },
+    { id: "figma", name: "Figma", url: "https://www.figma.com", icon: "◧", color: "#bd8dca", page: "tools", category: "设计" },
+    { id: "docs", name: "云文档", url: "https://docs.google.com", icon: "▤", color: "#78a9df", page: "tools", category: "效率" },
+    { id: "compress", name: "压缩工具", url: "https://squoosh.app", icon: "⇲", color: "#9d83c3", page: "tools", category: "工具" }
+  ],
+  widgets: [
+    { id: "weather", type: "weather", page: "home", size: "medium" },
+    { id: "calendar", type: "calendar", page: "home", size: "medium" },
+    { id: "quote", type: "quote", page: "home", size: "medium" },
+    { id: "todo", type: "todo", page: "home", size: "medium" },
+    { id: "progress", type: "progress", page: "personal", size: "wide", title: "学习进度", content: "本周已完成 4 / 6 个小目标" },
+    { id: "recent", type: "recent", page: "personal", size: "medium" },
+    { id: "favorites", type: "favorites", page: "personal", size: "medium" },
+    { id: "watching", type: "watching", page: "media", size: "wide" },
+    { id: "player", type: "player", page: "media", size: "medium" },
+    { id: "note", type: "note", page: "tools", size: "medium", title: "灵感便签", content: "把今天冒出的好点子，先记在这里。" },
+    { id: "quick", type: "quick", page: "tools", size: "medium" }
+  ],
+  todos: [
+    { id: "todo-1", text: "完成机械设计作业", done: false },
+    { id: "todo-2", text: "去图书馆", done: false },
+    { id: "todo-3", text: "健身 1 小时", done: false },
+    { id: "todo-4", text: "看一集动漫", done: false }
+  ],
+  todoDate: "",
+  history: [],
+  searchHistory: [],
+  dock: ["chatgpt", "github", "bilibili", "google", "notion", "email", "drive", "vscode"],
+  favoriteIds: ["scholar", "library", "figma"],
+  watching: [
+    { title: "追一部喜欢的番", subtitle: "动漫 · 继续观看", url: "https://www.bilibili.com/anime/", tone: "peach", mark: "✿" },
+    { title: "周末电影清单", subtitle: "电影 · 待观看", url: "https://movie.douban.com", tone: "blue", mark: "◐" },
+    { title: "音乐现场", subtitle: "视频 · 收藏", url: "https://www.youtube.com", tone: "lavender", mark: "♫" }
+  ]
+};

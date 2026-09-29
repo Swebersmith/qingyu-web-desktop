@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#d9eced" />
+    <meta name="description" content="晴屿 Desktop · 属于自己的轻盈 Web 桌面" />
+    <title>晴屿 Desktop</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="wallpaper" id="wallpaper" aria-hidden="true"></div>
+    <div class="wallpaper-tint" aria-hidden="true"></div>
+
+    <div class="desktop-shell" id="desktopShell">
+      <header class="topbar">
+        <div class="brand" aria-label="晴屿 Desktop">
+          <span class="brand-mark">✳</span>
+          <span><strong>晴屿</strong><small>MY LITTLE DESKTOP</small></span>
+        </div>
+        <div class="top-actions">
+          <span class="top-date" id="topDate"></span>
+          <button class="round-action" id="editModeButton" type="button" title="整理桌面" aria-label="整理桌面">✦</button>
+          <button class="round-action" id="settingsButton" type="button" title="设置" aria-label="设置">⚙</button>
+        </div>
+      </header>
+
+      <main class="desktop-viewport" id="desktopViewport" aria-label="桌面页面">
+        <div class="page-track" id="pageTrack"></div>
+      </main>
+
+      <div class="bottom-system">
+        <button class="search-pill" id="searchTrigger" type="button" aria-haspopup="dialog" aria-label="打开搜索">
+          <span class="search-glyph" aria-hidden="true">⌕</span>
+          <span>搜索 App、网站或直接上网</span>
+          <kbd>⌘ K</kbd>
+        </button>
+        <nav class="page-dots" id="pageDots" aria-label="切换桌面页面"></nav>
+        <nav class="dock" id="dock" aria-label="快捷 Dock"></nav>
+      </div>
+    </div>
+
+    <div class="search-overlay" id="searchOverlay" aria-hidden="true">
+      <div class="search-backdrop" id="searchBackdrop"></div>
+      <section class="search-panel" role="dialog" aria-modal="true" aria-label="快捷搜索">
+        <div class="search-field">
+          <span class="search-glyph" aria-hidden="true">⌕</span>
+          <input id="searchInput" type="search" autocomplete="off" placeholder="搜索 App、网站，或输入关键词…" aria-label="搜索" />
+          <button id="searchClose" type="button" aria-label="关闭搜索">Esc</button>
+        </div>
+        <div class="search-body">
+          <p class="section-eyebrow" id="searchResultLabel">常用捷径</p>
+          <div id="searchResults" class="search-results"></div>
+        </div>
+        <div class="engine-bar"><span>使用搜索引擎</span><div id="engineChoices"></div></div>
+      </section>
+    </div>
+
+    <dialog class="settings-dialog" id="settingsDialog" aria-label="桌面设置">
+      <div class="settings-frame">
+        <header class="settings-head">
+          <div><p class="section-eyebrow">MAKE IT YOURS</p><h2>自定义桌面</h2></div>
+          <button class="icon-button" id="settingsClose" type="button" aria-label="关闭设置">×</button>
+        </header>
+        <nav class="settings-tabs" id="settingsTabs" aria-label="设置分类">
+          <button type="button" data-tab="apps" class="active">App</button>
+          <button type="button" data-tab="widgets">Widget</button>
+          <button type="button" data-tab="todos">今日计划</button>
+          <button type="button" data-tab="dock">Dock</button>
+          <button type="button" data-tab="appearance">外观</button>
+          <button type="button" data-tab="data">数据</button>
+        </nav>
+        <div class="settings-content" id="settingsContent"></div>
+      </div>
+    </dialog>
+
+    <dialog class="editor-dialog" id="editorDialog" aria-label="编辑项目">
+      <form id="editorForm" method="dialog">
+        <header><h2 id="editorTitle">编辑</h2><button class="icon-button" id="editorClose" type="button" aria-label="关闭">×</button></header>
+        <div id="editorFields"></div>
+        <footer><button id="editorDelete" class="text-danger" type="button">删除</button><span></span><button class="button-secondary" id="editorCancel" type="button">取消</button><button class="button-primary" type="submit">保存</button></footer>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./config.js"></script>
+    <script src="./script.js"></script>
+  </body>
+</html>
