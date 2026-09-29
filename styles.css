@@ -75,5 +75,9 @@ dialog{border:0;padding:0;max-width:none;max-height:none;color:var(--ink)}dialog
   .desktop-canvas .widget-card[data-type="calendar"] .calendar-days{line-height:15px}
   .desktop-canvas .widget-card[data-type="watching"] .watch-card{min-width:105px}
   .bottom-system{padding-top:0}
-  .dock-app:nth-child(n+7){display:none}
+  .dock{gap:3px;padding:6px 5px;min-height:54px;overflow:visible;max-width:calc(100vw - 14px)}
+  .dock-app .app-icon{width:36px;height:36px;border-radius:11px;font-size:14px}
+  .dock-more{width:36px;height:36px;font-size:18px}
+  .dock-app:nth-child(n+7){display:grid}
 }
+@media(max-width:370px){.dock-app:nth-child(n+7){display:none}}
