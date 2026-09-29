@@ -6,6 +6,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const clone = value => JSON.parse(JSON.stringify(value));
   const pageIds = defaults.pages.map(page => page.id);
+  const newDefaultAppIds = new Set(['x','telegram','baidu','douban','maps','taobao','mooc','coursera','arxiv','wikipedia','deepl','keep','qqmusic','twitch','doubanmovie','doubanmusic','bilibangumi','epic','stackoverflow','mdn','codepen','vercel','unsplash','tinypng']);
   const quotes = [
     '生活嘛，就是要开心一点。',
     '今天也有值得期待的小事。',
@@ -33,13 +34,17 @@
     if (!raw || typeof raw !== 'object') return clone(defaults);
     const data = { ...clone(defaults), ...raw };
     data.pages = clone(defaults.pages);
-    data.apps = (Array.isArray(raw.apps) ? raw.apps : defaults.apps).filter(item => item && validUrl(item.url)).map(item => ({
+    const sourceApps = Array.isArray(raw.apps) ? [...raw.apps] : [...defaults.apps];
+    if ((Number(raw.version) || 1) < 2) defaults.apps.forEach(app => { if (newDefaultAppIds.has(app.id) && !sourceApps.some(item => item.id === app.id)) sourceApps.push(app); });
+    data.apps = sourceApps.filter(item => item && validUrl(item.url)).map(item => ({
       id: String(item.id || crypto.randomUUID()), name: String(item.name || '未命名').slice(0, 32),
       url: validUrl(item.url), icon: String(item.icon || '✦').slice(0, 180),
       color: /^#[\da-f]{6}$/i.test(item.color) ? item.color : '#6c9ca4',
       page: pageIds.includes(item.page) ? item.page : 'home', category: String(item.category || '常用').slice(0, 16)
     }));
-    data.widgets = (Array.isArray(raw.widgets) ? raw.widgets : defaults.widgets).filter(Boolean).map(item => ({
+    const sourceWidgets = Array.isArray(raw.widgets) ? [...raw.widgets] : [...defaults.widgets];
+    if ((Number(raw.version) || 1) < 2 && !sourceWidgets.some(item => item.id === 'clock')) sourceWidgets.unshift(defaults.widgets[0]);
+    data.widgets = sourceWidgets.filter(Boolean).map(item => ({
       id: String(item.id || crypto.randomUUID()), type: String(item.type || 'note'),
       page: pageIds.includes(item.page) ? item.page : 'home',
       size: ['small','medium','wide'].includes(item.size) ? item.size : 'medium',
@@ -55,6 +60,9 @@
     data.city = raw.city && Number.isFinite(Number(raw.city.latitude)) && Number.isFinite(Number(raw.city.longitude))
       ? { name: String(raw.city.name || '北京').slice(0, 24), latitude: Number(raw.city.latitude), longitude: Number(raw.city.longitude) }
       : clone(defaults.city);
+    data.layout = raw.layout && typeof raw.layout === 'object' ? raw.layout : { desktop: {}, tablet: {}, mobile: {} };
+    for (const mode of ['desktop','tablet','mobile']) if (!data.layout[mode] || typeof data.layout[mode] !== 'object') data.layout[mode] = {};
+    data.version = defaults.version;
     return data;
   }
   let stored = null;
@@ -78,6 +86,7 @@
   let wheelAt = 0;
   let pointerStart = null;
   let dragState = null;
+  let dockDrag = null;
   let suppressClickUntil = 0;
   const music = { context: null, timer: null, frame: null, playing: false, track: 0, elapsed: 0, lastTick: 0, lastNote: -1 };
 
@@ -130,31 +139,65 @@
     const dateText = $('#clockDate'); if (dateText) dateText.textContent = longDate;
     $('#topDate').textContent = new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'short'}).format(date);
   }
+  function layoutMode() { return innerWidth <= 700 ? 'mobile' : innerWidth <= 1100 ? 'tablet' : 'desktop'; }
+  function gridColumns(mode) { return mode === 'mobile' ? 4 : mode === 'tablet' ? 8 : 12; }
+  function tileSize(item, mode) {
+    if (item.kind === 'app') return { w: 1, h: 1 };
+    const type = item.data.type;
+    if (mode === 'mobile') {
+      if (type === 'clock') return { w: 4, h: 1 };
+      if (type === 'watching' || type === 'calendar') return { w: 4, h: 3 };
+      if (type === 'todo' || type === 'player') return { w: 2, h: 3 };
+      return { w: item.data.size === 'wide' ? 4 : 2, h: 2 };
+    }
+    if (mode === 'tablet') return { w: type === 'clock' || item.data.size === 'wide' ? 4 : 2, h: type === 'calendar' || type === 'todo' ? 3 : 2 };
+    return { w: type === 'clock' || item.data.size === 'wide' ? 4 : item.data.size === 'small' ? 2 : 3, h: type === 'calendar' || type === 'todo' ? 3 : 2 };
+  }
+  function pageItems(pageId, mode) {
+    const widgets = state.widgets.filter(item => item.page === pageId).map(data => ({ kind: 'widget', data, id: data.id }));
+    const apps = state.apps.filter(item => item.page === pageId).map(data => ({ kind: 'app', data, id: data.id }));
+    if (mode === 'mobile') {
+      const prominent = widgets.filter(item => ['clock','weather','todo','player','watching'].includes(item.data.type));
+      const rest = widgets.filter(item => !prominent.includes(item));
+      return [...prominent, ...apps, ...rest];
+    }
+    return [...widgets, ...apps];
+  }
+  function layoutPage(pageId, mode) {
+    const columns = gridColumns(mode), occupied = new Set(), positions = new Map();
+    const saved = state.layout[mode];
+    const items = pageItems(pageId, mode).sort((a,b) => (Number(saved[b.id]?.priority)||0) - (Number(saved[a.id]?.priority)||0));
+    const canFit = (x,y,w,h) => {
+      if (x < 0 || y < 0 || x + w > columns) return false;
+      for (let row=y;row<y+h;row++) for(let col=x;col<x+w;col++) if(occupied.has(`${col},${row}`)) return false;
+      return true;
+    };
+    items.forEach(item => {
+      const {w,h} = tileSize(item,mode), pref = saved[item.id]?.page === pageId ? saved[item.id] : null;
+      let x = Number(pref?.x), y = Number(pref?.y);
+      if (!Number.isInteger(x) || !Number.isInteger(y) || !canFit(x,y,w,h)) {
+        outer: for(y=0;y<120;y++) for(x=0;x<=columns-w;x++) if(canFit(x,y,w,h)) break outer;
+      }
+      positions.set(item.id,{x,y,w,h});
+      for(let row=y;row<y+h;row++) for(let col=x;col<x+w;col++) occupied.add(`${col},${row}`);
+    });
+    return positions;
+  }
   function renderPages() {
     const track = $('#pageTrack'); track.replaceChildren();
+    const mode = layoutMode();
     state.pages.forEach((page,index) => {
       const section = el('section','desktop-page'); section.dataset.page = page.id; section.setAttribute('aria-label',page.name);
       const inner = el('div','page-inner');
-      const lead = el('header',index === 0 ? 'page-lead home-lead' : 'page-lead secondary-lead');
-      if (index === 0) {
-        const group = el('div','clock-group'); const clock = el('div','clock-big','--:--'); clock.id = 'clockText'; group.append(clock);
-        const copy = el('div','home-lead-copy');
-        copy.append(el('p','eyebrow',page.eyebrow),el('h1','',page.title));
-        const date = el('p','', ''); date.id = 'clockDate'; copy.append(date); group.append(copy); lead.append(group);
-      } else {
-        const copy = el('div'); copy.append(el('p','eyebrow',page.eyebrow),el('h1','',page.title),el('p','',page.name));
-        lead.append(copy,el('span','page-number',String(index+1).padStart(2,'0')));
-      }
-      inner.append(lead);
-      const widgets = el('div','widget-grid'); widgets.dataset.widgetPage = page.id;
-      state.widgets.filter(w => w.page === page.id).forEach(widget => widgets.append(renderWidget(widget)));
-      inner.append(widgets);
-      const appSection = el('section','apps-section');
-      const head = el('div','apps-head'); head.append(el('h2','',index === 0 ? '常用 App' : '我的 App'),el('small','',`${state.apps.filter(app=>app.page===page.id).length} 个捷径 · 点击直达`));
-      appSection.append(head);
-      const grid = el('div','apps-grid'); grid.dataset.appPage = page.id;
-      state.apps.filter(app => app.page === page.id).forEach(app => grid.append(renderApp(app)));
-      appSection.append(grid); inner.append(appSection); section.append(inner); track.append(section);
+      const heading = el('div','desktop-heading'); heading.append(el('span','desktop-heading-name',page.name),el('span','desktop-heading-hint',`${state.apps.filter(app=>app.page===page.id).length} 个 App · 拖动以整理`)); inner.append(heading);
+      const canvas = el('div','desktop-canvas'); canvas.dataset.page = page.id; canvas.dataset.mode = mode;
+      const positions = layoutPage(page.id,mode);
+      pageItems(page.id,mode).forEach(item => {
+        const node = item.kind === 'app' ? renderApp(item.data) : renderWidget(item.data);
+        const pos = positions.get(item.id); node.style.gridColumn = `${pos.x+1} / span ${pos.w}`; node.style.gridRow = `${pos.y+1} / span ${pos.h}`;
+        node.dataset.kind = item.kind; node.dataset.page = page.id; canvas.append(node);
+      });
+      inner.append(canvas); section.append(inner); track.append(section);
     });
     renderDots(); updateClock(); setPage(currentPage,false);
     $('#desktopShell').classList.toggle('editing',editing);
@@ -166,12 +209,13 @@
   function setPage(index, animate = true) {
     currentPage = Math.max(0,Math.min(state.pages.length-1,index));
     const track = $('#pageTrack');
+    $('#topPageName').textContent = state.pages[currentPage].name;
     if (!animate) { track.classList.add('dragging'); requestAnimationFrame(() => track.classList.remove('dragging')); }
     track.style.transform = `translate3d(${-currentPage*100}%,0,0)`;
     [...$('#pageDots').children].forEach((dot,i) => { dot.classList.toggle('active',i===currentPage); dot.setAttribute('aria-current',String(i===currentPage)); });
   }
   function renderApp(app) {
-    const wrap = el('div','app-shortcut'); wrap.dataset.id = app.id; wrap.draggable = editing;
+    const wrap = el('div','app-shortcut'); wrap.dataset.id = app.id;
     const link = el('a'); link.href = app.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.setAttribute('aria-label',`打开 ${app.name}`);
     link.draggable = false;
     link.append(appIcon(app),el('span','app-name',app.name));
@@ -183,11 +227,16 @@
     wrap.append(link,edit); attachDrag(wrap,'app',app.id); return wrap;
   }
   function renderWidget(widget) {
-    const card = el('article','widget-card'); card.dataset.id=widget.id; card.dataset.type=widget.type; card.dataset.size=widget.size; card.draggable=editing;
+    const card = el('article','widget-card'); card.dataset.id=widget.id; card.dataset.type=widget.type; card.dataset.size=widget.size;
     const head=el('div','widget-head'); head.append(el('span','widget-label',widget.title || widgetLabel(widget.type)));
     const symbol=el('span','widget-symbol',widgetSymbol(widget.type)); head.append(symbol); card.append(head);
     const content=el('div','widget-content'); card.append(content);
     switch(widget.type) {
+      case 'clock': {
+        content.append(el('div','clock-big','--:--'),el('p','clock-date',''));
+        $('.clock-big',content).id='clockText'; $('.clock-date',content).id='clockDate';
+        content.append(el('p','clock-message','今天也要开心呀！ ☀️')); break;
+      }
       case 'weather': renderWeather(content); break;
       case 'calendar': renderCalendar(content); break;
       case 'quote': renderQuote(content); card.classList.add('quote-card'); break;
@@ -205,8 +254,8 @@
     if (['note','link','progress'].includes(widget.type)) card.addEventListener('dblclick',() => openEditor('widget',widget.id));
     attachDrag(card,'widget',widget.id); return card;
   }
-  function widgetLabel(type) { return ({weather:'今日天气',calendar:'本月日历',quote:'每日一句',todo:'今日计划',progress:'学习进度',recent:'最近访问',favorites:'收藏网站',watching:'继续观看',player:'迷你播放器',note:'便签',link:'快捷链接',quick:'快捷工具'})[type]||'Widget'; }
-  function widgetSymbol(type) { return ({weather:'☀',calendar:'▦',quote:'✿',todo:'✓',progress:'↗',recent:'↗',favorites:'♡',watching:'▶',player:'♫',note:'✎',link:'↗',quick:'⌘'})[type]||'✦'; }
+  function widgetLabel(type) { return ({clock:'此刻',weather:'今日天气',calendar:'本月日历',quote:'每日一句',todo:'今日计划',progress:'学习进度',recent:'最近访问',favorites:'收藏网站',watching:'继续观看',player:'迷你播放器',note:'便签',link:'快捷链接',quick:'快捷工具'})[type]||'Widget'; }
+  function widgetSymbol(type) { return ({clock:'◷',weather:'☀',calendar:'▦',quote:'✿',todo:'✓',progress:'↗',recent:'↗',favorites:'♡',watching:'▶',player:'♫',note:'✎',link:'↗',quick:'⌘'})[type]||'✦'; }
   function renderWeather(root) {
     const top=el('div','weather-top'); const left=el('div'); left.append(el('div','weather-degree',weather ? `${Math.round(weather.temp)}°` : '--°'),el('div','widget-empty',state.city.name));
     top.append(left,el('div','weather-art',weather?.symbol||'☀️')); root.append(top);
@@ -272,25 +321,80 @@
   }
   function renderDock() {
     const dock=$('#dock');dock.replaceChildren();
-    state.dock.forEach(id=>{const app=appById(id);if(!app)return;const button=el('button','dock-app');button.type='button';button.title=app.name;button.setAttribute('aria-label',`打开 ${app.name}`);button.append(appIcon(app),el('span','dock-tooltip',app.name));button.addEventListener('click',()=>openApp(app));dock.append(button);});
+    state.dock.forEach(id=>{const app=appById(id);if(!app)return;const button=el('button','dock-app');button.type='button';button.dataset.id=id;button.title=app.name;button.setAttribute('aria-label',`打开 ${app.name}`);button.append(appIcon(app),el('span','dock-tooltip',app.name));button.addEventListener('click',event=>{if(Date.now()<suppressClickUntil){event.preventDefault();return;}openApp(app);});dock.append(button);});
     dock.append(el('span','dock-divider'));
     const more=el('button','dock-more','⋯');more.type='button';more.title='更多与设置';more.setAttribute('aria-label','更多与设置');more.addEventListener('click',openSettings);dock.append(more);
     dock.querySelectorAll('.dock-app').forEach((button,index,all)=>{
       button.addEventListener('mouseenter',()=>{if(all[index-1])all[index-1].classList.add('neighbor');if(all[index+1])all[index+1].classList.add('neighbor');});
       button.addEventListener('mouseleave',()=>all.forEach(item=>item.classList.remove('neighbor')));
+      button.addEventListener('pointerdown',event=>{if(event.button!==0)return;dockDrag={id:button.dataset.id,button,x:event.clientX,y:event.clientY,pointerId:event.pointerId,active:false};});
     });
   }
-  function attachDrag(node,type,id) {
-    node.addEventListener('dragstart',event=>{if(!editing){event.preventDefault();return;}dragState={type,id};node.classList.add('is-dragging');event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',id);});
-    node.addEventListener('dragend',()=>{node.classList.remove('is-dragging');document.querySelectorAll('.drag-target').forEach(item=>item.classList.remove('drag-target'));dragState=null;});
-    node.addEventListener('dragover',event=>{if(dragState?.type!==type||dragState.id===id)return;event.preventDefault();node.classList.add('drag-target');});
-    node.addEventListener('dragleave',()=>node.classList.remove('drag-target'));
-    node.addEventListener('drop',event=>{event.preventDefault();node.classList.remove('drag-target');if(dragState?.type!==type||dragState.id===id)return;reorder(type,dragState.id,id);});
+  window.addEventListener('pointermove',event=>{
+    const drag=dockDrag;if(!drag||drag.pointerId!==event.pointerId)return;
+    const dx=event.clientX-drag.x,dy=event.clientY-drag.y;
+    if(!drag.active&&Math.hypot(dx,dy)<7)return;
+    drag.active=true;event.preventDefault();drag.button.classList.add('dock-dragging');
+    drag.button.style.transform=`translate(${dx}px,${dy}px) scale(1.08)`;
+    document.querySelectorAll('.dock-drop-target').forEach(node=>node.classList.remove('dock-drop-target'));
+    const target=document.elementFromPoint(event.clientX,event.clientY)?.closest('.dock-app');
+    if(target&&target!==drag.button)target.classList.add('dock-drop-target');
+  },{passive:false});
+  function finishDockDrag(event){
+    const drag=dockDrag;if(!drag||drag.pointerId!==event.pointerId)return;dockDrag=null;
+    drag.button.style.transform='';drag.button.classList.remove('dock-dragging');
+    const target=document.elementFromPoint(event.clientX,event.clientY)?.closest('.dock-app');
+    document.querySelectorAll('.dock-drop-target').forEach(node=>node.classList.remove('dock-drop-target'));
+    if(!drag.active)return;
+    suppressClickUntil=Date.now()+450;
+    if(!target||target===drag.button)return;
+    const from=state.dock.indexOf(drag.id),to=state.dock.indexOf(target.dataset.id);
+    if(from<0||to<0)return;
+    state.dock.splice(from,1);state.dock.splice(to,0,drag.id);save();renderDock();toast('Dock 顺序已保存');
   }
-  function reorder(type,fromId,toId) {
-    const list=type==='app'?state.apps:state.widgets;
-    const from=list.findIndex(item=>item.id===fromId),to=list.findIndex(item=>item.id===toId);
-    if(from<0||to<0)return;const [item]=list.splice(from,1);list.splice(to,0,item);save();renderPages();if($('#settingsDialog').open)renderSettings();
+  window.addEventListener('pointerup',finishDockDrag);
+  window.addEventListener('pointercancel',finishDockDrag);
+  function attachDrag(node,type,id) {
+    node.addEventListener('pointerdown',event => {
+      if (event.button !== 0 || dragState || $('#settingsDialog').open || $('#searchOverlay').classList.contains('open')) return;
+      if (event.target.closest('.app-edit,.widget-edit')) return;
+      if (type === 'widget' && event.target.closest('button,a,input,label,.player-progress')) return;
+      const rect=node.getBoundingClientRect();
+      dragState={node,type,id,page:node.dataset.page,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,
+        offsetX:event.clientX-rect.left,offsetY:event.clientY-rect.top,width:rect.width,height:rect.height,active:false,touch:event.pointerType==='touch'};
+      if (dragState.touch && !editing) dragState.timer=setTimeout(()=>startTileDrag(dragState),320);
+    });
+  }
+  function startTileDrag(drag) {
+    if (!drag || drag !== dragState || drag.active) return;
+    drag.active=true; clearTimeout(drag.timer); drag.node.classList.add('is-dragging');
+    const ghost=drag.node.cloneNode(true); ghost.removeAttribute('id'); ghost.querySelectorAll('[id]').forEach(child=>child.removeAttribute('id'));
+    ghost.classList.add('drag-ghost'); ghost.classList.remove('is-dragging');
+    ghost.style.width=`${drag.width}px`; ghost.style.height=`${drag.height}px`;
+    ghost.style.left=`${drag.startX-drag.offsetX}px`; ghost.style.top=`${drag.startY-drag.offsetY}px`;
+    document.body.append(ghost); drag.ghost=ghost;
+    $('#desktopShell').classList.add('drag-active');
+  }
+  function stopTileDrag(event, canceled=false) {
+    const drag=dragState;
+    if (!drag || drag.pointerId!==event.pointerId) return;
+    clearTimeout(drag.timer); clearTimeout(drag.edgeTimer); dragState=null;
+    if (!drag.active) return;
+    drag.node.classList.remove('is-dragging'); drag.ghost?.remove(); $('#desktopShell').classList.remove('drag-active');
+    suppressClickUntil=Date.now()+450;
+    if (canceled) return;
+    const pageId=state.pages[currentPage].id;
+    const canvas=document.querySelector(`.desktop-canvas[data-page="${pageId}"]`); if (!canvas) return;
+    const mode=layoutMode(), columns=gridColumns(mode), item={kind:drag.type,data:drag.type==='app'?appById(drag.id):state.widgets.find(w=>w.id===drag.id)};
+    if (!item.data) return;
+    const {w}=tileSize(item,mode), rect=canvas.getBoundingClientRect(), style=getComputedStyle(canvas);
+    const gap=parseFloat(style.columnGap)||0, pitchX=(rect.width-gap*(columns-1))/columns+gap;
+    const pitchY=parseFloat(style.gridAutoRows)+ (parseFloat(style.rowGap)||0);
+    const x=Math.max(0,Math.min(columns-w,Math.round((event.clientX-drag.offsetX-rect.left)/pitchX)));
+    const y=Math.max(0,Math.min(110,Math.round((event.clientY-drag.offsetY-rect.top)/pitchY)));
+    item.data.page=pageId;
+    state.layout[mode][drag.id]={page:pageId,x,y,priority:Date.now()};
+    save(); renderPages(); toast('位置已保存');
   }
   function moveItem(type,id,direction) {
     const list=type==='app'?state.apps:state.widgets;const index=list.findIndex(item=>item.id===id);const next=index+direction;
@@ -299,8 +403,7 @@
   }
   function toggleEdit() {
     editing=!editing;$('#desktopShell').classList.toggle('editing',editing);$('#editModeButton').classList.toggle('active',editing);
-    document.querySelectorAll('.app-shortcut,.widget-card').forEach(node=>node.draggable=editing);
-    toast(editing?'整理模式：拖动图标或卡片排序':'桌面布局已保存');
+    toast(editing?'整理模式：拖动 App 或卡片，点击 ✎ 编辑':'桌面布局已保存');
   }
   function searchOpen() {
     $('#searchOverlay').classList.add('open');$('#searchOverlay').setAttribute('aria-hidden','false');$('#searchInput').value='';selectedSearch=0;renderSearch();setTimeout(()=>$('#searchInput').focus(),70);
@@ -426,7 +529,7 @@
     if(type==='app'){
       add('name','名称',item?.name||'');add('url','网站 URL',item?.url||'https://','url');add('icon','图标字符 / 图片 URL',item?.icon||'✦');add('color','图标背景色',item?.color||'#6c9ca4','color');add('category','分类',item?.category||'常用');add('page','桌面页面',item?.page||state.pages[currentPage].id,'select',state.pages.map(page=>[page.id,page.name]));
     }else{
-      add('type','Widget 类型',item?.type||'note','select',['note','link','todo','calendar','quote','weather','progress','recent','favorites','watching','player','quick'].map(t=>[t,widgetLabel(t)]));
+      add('type','Widget 类型',item?.type||'note','select',['clock','note','link','todo','calendar','quote','weather','progress','recent','favorites','watching','player','quick'].map(t=>[t,widgetLabel(t)]));
       add('title','标题',item?.title||'');add('content','内容 / 链接',item?.content||'','textarea');add('size','卡片尺寸',item?.size||'medium','select',[['small','小'],['medium','标准'],['wide','宽']]);add('page','桌面页面',item?.page||state.pages[currentPage].id,'select',state.pages.map(page=>[page.id,page.name]));
     }
     editorContext.fields=fields;$('#editorDialog').showModal();fields.name?.focus();
@@ -502,15 +605,40 @@
   $('#desktopViewport').addEventListener('wheel',event=>{
     if($('#settingsDialog').open||$('#searchOverlay').classList.contains('open')||editing)return;
     if(Math.abs(event.deltaX)+Math.abs(event.deltaY)<15)return;
+    const page=$('#pageTrack').children[currentPage];
+    if (Math.abs(event.deltaY)>Math.abs(event.deltaX) && page && page.scrollHeight>page.clientHeight+3 && !event.shiftKey) return;
     if(Date.now()-wheelAt<550){event.preventDefault();return;}
     wheelAt=Date.now();event.preventDefault();setPage(currentPage+(Math.abs(event.deltaX)>Math.abs(event.deltaY)?Math.sign(event.deltaX):Math.sign(event.deltaY)));
   },{passive:false});
   const viewport=$('#desktopViewport');
-  viewport.addEventListener('pointerdown',event=>{if(editing||event.button!==0||event.target.closest('input,textarea,select,button'))return;pointerStart={x:event.clientX,y:event.clientY,page:currentPage,id:event.pointerId};});
-  viewport.addEventListener('pointermove',event=>{if(!pointerStart||pointerStart.id!==event.pointerId)return;const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y;if(Math.abs(dx)<8||Math.abs(dx)<Math.abs(dy)*1.2)return;const width=viewport.clientWidth;$('#pageTrack').classList.add('dragging');$('#pageTrack').style.transform=`translate3d(calc(${-pointerStart.page*100}% + ${Math.max(-width*.45,Math.min(width*.45,dx))}px),0,0)`;});
-  function finishPointer(event){if(!pointerStart||pointerStart.id!==event.pointerId)return;const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y;$('#pageTrack').classList.remove('dragging');if(Math.abs(dx)>55&&Math.abs(dx)>Math.abs(dy)*1.2){suppressClickUntil=Date.now()+400;setPage(pointerStart.page+(dx<0?1:-1));}else setPage(pointerStart.page);pointerStart=null;}
+  window.addEventListener('pointermove',event=>{
+    const drag=dragState; if(!drag || drag.pointerId!==event.pointerId)return;
+    const distance=Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY);
+    if(drag.touch && distance>12 && !drag.active)clearTimeout(drag.timer);
+    if(!drag.active && distance>7 && (!drag.touch || editing))startTileDrag(drag);
+    if(!drag.active)return;
+    event.preventDefault(); drag.ghost.style.left=`${event.clientX-drag.offsetX}px`;drag.ghost.style.top=`${event.clientY-drag.offsetY}px`;
+    const edge=event.clientX<38?-1:event.clientX>innerWidth-38?1:0;
+    const destination=currentPage+edge;
+    if(edge && destination>=0 && destination<state.pages.length){
+      if(drag.edgeDestination!==destination){clearTimeout(drag.edgeTimer);drag.edgeDestination=destination;
+        drag.edgeTimer=setTimeout(()=>{if(dragState===drag){setPage(destination);drag.edgeDestination=null;}},560);}
+    }else{clearTimeout(drag.edgeTimer);drag.edgeDestination=null;}
+    const page=$('#pageTrack').children[currentPage]; const rect=page?.getBoundingClientRect();
+    if(rect && event.clientY>rect.bottom-35)page.scrollTop+=14;
+    else if(rect && event.clientY<rect.top+35)page.scrollTop-=14;
+  },{passive:false});
+  window.addEventListener('pointerup',event=>stopTileDrag(event));
+  window.addEventListener('pointercancel',event=>stopTileDrag(event,true));
+  viewport.addEventListener('pointerdown',event=>{if(editing||event.button!==0||event.target.closest('input,textarea,select,button'))return;
+    if(event.pointerType!=='touch' && event.target.closest('.app-shortcut,.widget-card'))return;
+    pointerStart={x:event.clientX,y:event.clientY,page:currentPage,id:event.pointerId};});
+  viewport.addEventListener('pointermove',event=>{if(!pointerStart||pointerStart.id!==event.pointerId||dragState?.active)return;const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y;if(Math.abs(dx)<8||Math.abs(dx)<Math.abs(dy)*1.2)return;const width=viewport.clientWidth;$('#pageTrack').classList.add('dragging');$('#pageTrack').style.transform=`translate3d(calc(${-pointerStart.page*100}% + ${Math.max(-width*.45,Math.min(width*.45,dx))}px),0,0)`;});
+  function finishPointer(event){if(!pointerStart||pointerStart.id!==event.pointerId)return;if(dragState?.active){pointerStart=null;$('#pageTrack').classList.remove('dragging');setPage(currentPage);return;}const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y;$('#pageTrack').classList.remove('dragging');if(Math.abs(dx)>55&&Math.abs(dx)>Math.abs(dy)*1.2){suppressClickUntil=Date.now()+400;setPage(pointerStart.page+(dx<0?1:-1));}else setPage(pointerStart.page);pointerStart=null;}
   viewport.addEventListener('pointerup',finishPointer);viewport.addEventListener('pointercancel',finishPointer);
   viewport.addEventListener('click',event=>{if(Date.now()<suppressClickUntil){event.preventDefault();event.stopPropagation();}},true);
+  let lastMode=layoutMode();
+  window.addEventListener('resize',()=>{const next=layoutMode();if(next!==lastMode){lastMode=next;renderPages();}});
 
   setWallpaper();renderPages();renderDock();loadWeather();updateClock();setInterval(updateClock,30000);
 })();

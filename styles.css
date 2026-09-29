@@ -14,3 +14,66 @@ dialog{border:0;padding:0;max-width:none;max-height:none;color:var(--ink)}dialog
 @media(max-width:380px){.apps-grid{grid-template-columns:repeat(4,1fr)}.widget-card{min-height:130px}}
 @media(pointer:coarse){.widget-card,.dock,.search-pill{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(255,255,255,.76)}.app-shortcut:hover,.widget-card:hover,.dock-app:hover{transform:none}.dock-app:hover .dock-tooltip{opacity:0}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+/* Tablet desktop: the canvas ends before the fixed search and Dock area. */
+.desktop-shell{min-height:0}
+.topbar{height:62px;padding:12px clamp(20px,4vw,70px)}
+.top-context{display:flex;align-items:center;gap:8px;color:#31545c;font-size:12px;font-weight:700;letter-spacing:.02em;text-shadow:0 1px 12px #fff}
+.top-context-separator{opacity:.45}
+.desktop-viewport{inset:62px 0 174px;touch-action:pan-y}
+.desktop-page{padding:0 clamp(20px,4vw,70px) 24px;overscroll-behavior:contain}
+.page-inner{max-width:1380px;margin:auto}
+.desktop-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;height:29px;margin-bottom:10px;padding:0 3px;color:#31555e;text-shadow:0 1px 12px #fff}
+.desktop-heading-name{font-size:14px;font-weight:800}
+.desktop-heading-hint{font-size:10px;font-weight:700;opacity:.72}
+.desktop-canvas{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:78px;gap:12px;align-content:start;min-height:100%;padding-bottom:8px}
+.desktop-canvas .widget-card{min-width:0;min-height:0;height:100%;padding:17px 19px;display:flex;flex-direction:column;overflow:hidden;cursor:grab}
+.desktop-canvas .widget-card:active,.desktop-canvas .app-shortcut:active{cursor:grabbing}
+.desktop-canvas .widget-content{min-height:0;flex:1;overflow:hidden}
+.desktop-canvas .app-shortcut{min-height:0;justify-content:center;gap:6px;cursor:grab;touch-action:pan-y}
+.desktop-canvas .app-shortcut>a{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;min-width:0}
+.desktop-canvas .app-icon{width:60px;height:60px;border-radius:19px}
+.desktop-canvas .app-name{max-width:100%;font-size:11px}
+.desktop-canvas .widget-card[data-type="clock"]{background:rgba(255,255,255,.43)}
+.desktop-canvas .widget-card[data-type="clock"] .widget-head{margin-bottom:2px}
+.desktop-canvas .clock-big{font-size:clamp(58px,5.2vw,78px);line-height:1;letter-spacing:-.09em}
+.clock-date{font-size:12px;color:#517078;margin-top:3px!important}
+.clock-message{position:absolute;left:19px;bottom:14px;font-size:11px;color:#567078;margin:0!important}
+.desktop-canvas .widget-card[data-type="calendar"] .calendar-days{line-height:17px}
+.desktop-canvas .widget-card[data-type="calendar"] .calendar-week{margin:4px 0 2px}
+.drag-ghost{position:fixed!important;z-index:80!important;margin:0!important;pointer-events:none!important;transform:none!important;opacity:.95!important;box-shadow:0 24px 60px rgba(28,55,61,.28)!important;transition:none!important}
+.desktop-canvas .is-dragging{opacity:.22!important}
+.dock-app{touch-action:none}
+.dock-app.dock-dragging{z-index:4;transition:none;pointer-events:none}
+.dock-app.dock-drop-target .app-icon{outline:2px solid #4c9eaa;outline-offset:3px}
+.editing .desktop-canvas .app-shortcut,.editing .desktop-canvas .widget-card{touch-action:none}
+.bottom-system{padding-top:5px}
+.bottom-system::before{content:"";position:absolute;inset:-10px 0 0;z-index:-1;background:linear-gradient(180deg,transparent,rgba(225,241,240,.12) 40%,rgba(225,241,240,.24));pointer-events:none}
+@media(max-width:1100px){
+  .desktop-canvas{grid-template-columns:repeat(8,minmax(0,1fr));grid-auto-rows:76px;gap:10px}
+  .desktop-viewport{bottom:168px}
+}
+@media(max-width:700px){
+  .topbar{height:54px;padding:8px 15px}
+  .top-context{font-size:11px}
+  .desktop-viewport{top:54px;bottom:169px}
+  .desktop-page{padding:0 13px 20px}
+  .desktop-heading{height:28px;margin-bottom:6px}
+  .desktop-heading-name{font-size:12px}
+  .desktop-heading-hint{font-size:9px}
+  .desktop-canvas{grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:75px;gap:9px}
+  .desktop-canvas .widget-card{border-radius:20px;padding:12px;min-height:0}
+  .desktop-canvas .widget-card[data-type="clock"]{padding:8px 13px}
+  .desktop-canvas .widget-card[data-type="clock"] .widget-head{display:none}
+  .desktop-canvas .widget-card[data-type="clock"] .widget-content{display:flex;align-items:center;gap:12px;overflow:visible}
+  .desktop-canvas .widget-card[data-type="clock"] .clock-big{font-size:48px;white-space:nowrap}
+  .desktop-canvas .widget-card[data-type="clock"] .clock-date{font-size:10px;margin:0!important}
+  .desktop-canvas .widget-card[data-type="clock"] .clock-message{display:none}
+  .desktop-canvas .widget-card[data-type="quote"],.desktop-canvas .widget-card[data-type="calendar"]{display:flex}
+  .desktop-canvas .app-icon{width:min(56px,14vw);height:min(56px,14vw);border-radius:16px}
+  .desktop-canvas .app-name{font-size:10px}
+  .desktop-canvas .widget-card[data-type="calendar"] .calendar-days{line-height:15px}
+  .desktop-canvas .widget-card[data-type="watching"] .watch-card{min-width:105px}
+  .bottom-system{padding-top:0}
+  .dock-app:nth-child(n+7){display:none}
+}
