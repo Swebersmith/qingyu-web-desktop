@@ -6,9 +6,10 @@
 
 - 四组桌面：鼠标拖动、触摸滑动、滚轮和方向键切换，自动吸附。每屏固定且不需要上下滚动；内容过多时自动续到下一张横向桌面。
 - 每页默认 14 个 App 图标，一键打开网站；固定 Dock 可直接拖动排序。
-- 搜索面板实时匹配 App、网址和搜索历史；支持 Google、Bing、百度、GitHub。
+- 搜索框从 Dock 上方的胶囊形入口向上展开为悬浮面板，实时匹配 App、网址和搜索历史；支持 Google、Bing、百度、GitHub。
 - 实时时钟、月历、可勾选和编辑的每日 Todo、每日一句、实时天气、最近访问、收藏、学习进度、继续观看和原创轻音乐播放器。
-- App 和 Widget 在同一张桌面网格内自由拖动、自动吸附并保存位置；拖到左右边缘稍作停留可移到相邻页面。触屏长按拖动，点右上角 ✦ 可进入整理模式。
+- App 和 Widget 在同一张桌面网格内自由拖动：拖动时预览落点，同尺寸卡片平滑让位，松手后才保存位置，不会让整页突然重排；拖到左右边缘稍作停留可移到相邻页面。触屏长按拖动，点右上角 ✦ 可进入整理模式。
+- App 默认根据网址自动获取网站图标；图标不可用时显示备用文字或 emoji，也可在编辑快捷方式时切换为手动图标。
 - 右键点击 App 图标或 Dock 图标，可打开、编辑、复制链接、移动页面、加入或移出 Dock，以及删除快捷方式。
 - 设置面板增删改 App、Widget、Dock、壁纸和天气位置。
 - 浏览器自动保存配置，支持 JSON 备份和导入，并兼容原项目的 `shortcuts` / `widgets` 导出结构。
@@ -38,10 +39,10 @@ npm run build
 直接在网页右上角的设置中编辑。首次加载的默认桌面数据位于 [`config.js`](./config.js)，采用 JSON 兼容的对象结构：
 
 ```js
-{ id: "github", name: "GitHub", url: "https://github.com", icon: "GH", color: "#252b3a", page: "home", category: "开发" }
+{ id: "github", name: "GitHub", url: "https://github.com", icon: "GH", iconMode: "auto", color: "#252b3a", page: "home", category: "开发" }
 ```
 
-图标可用文字、emoji，或以 `https://` 开头的图片 URL。自定义壁纸和布局保存在当前浏览器的 `localStorage` 中；跨设备迁移请在设置 → 数据中导出和导入 JSON。
+`iconMode: "auto"` 根据 `url` 获取网站图标，`icon` 是加载失败时的备用标识；`iconMode: "custom"` 使用手动图标。手动图标可用文字、emoji，或以 `https://` 开头的图片 URL。自定义壁纸和布局保存在当前浏览器的 `localStorage` 中；跨设备迁移请在设置 → 数据中导出和导入 JSON。
 
 天气由 [Open-Meteo](https://open-meteo.com/) 提供，无需 API Key；请求失败时显示不可用状态。迷你播放器使用浏览器 Web Audio 合成三段原创旋律，不会请求外部音乐文件。
 
