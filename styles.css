@@ -36,7 +36,7 @@ dialog{border:0;padding:0;max-width:none;max-height:none;color:var(--ink)}dialog
 .desktop-canvas .app-name{max-width:100%;font-size:11px}
 .desktop-canvas .widget-card[data-type="clock"]{background:rgba(255,255,255,.43)}
 .desktop-canvas .widget-card[data-type="clock"] .widget-head{margin-bottom:2px}
-.desktop-canvas .clock-big{font-size:clamp(58px,5.2vw,78px);line-height:1;letter-spacing:-.09em}
+.desktop-canvas .clock-big{font-size:clamp(54px,4.8vw,70px);line-height:1;letter-spacing:-.09em}
 .clock-date{font-size:12px;color:#517078;margin-top:3px!important}
 .clock-message{position:absolute;left:19px;bottom:14px;font-size:11px;color:#567078;margin:0!important}
 .desktop-canvas .widget-card[data-type="calendar"] .calendar-days{line-height:17px}
@@ -81,3 +81,29 @@ dialog{border:0;padding:0;max-width:none;max-height:none;color:var(--ink)}dialog
   .dock-app:nth-child(n+7){display:grid}
 }
 @media(max-width:370px){.dock-app:nth-child(n+7){display:none}}
+
+/* A desktop page is a single screen. Extra tiles continue on the next horizontal screen. */
+.desktop-viewport,.desktop-canvas .app-shortcut,.desktop-canvas .widget-card{touch-action:none}
+.desktop-page{overflow:hidden;padding-bottom:0;overscroll-behavior:none}
+.page-inner{height:100%;display:flex;flex-direction:column}
+.desktop-canvas{--tile-row:78px;--tile-gap:12px;flex:1;min-height:0;padding-bottom:0;grid-auto-rows:var(--tile-row);gap:var(--tile-gap)}
+@media(max-width:1100px){.desktop-canvas{--tile-row:76px;--tile-gap:10px}.desktop-canvas .weather-degree{font-size:46px}.desktop-canvas .weather-bottom{margin-top:5px!important}}
+@media(max-height:680px){.desktop-canvas{--tile-row:65px;--tile-gap:8px}.desktop-canvas .app-icon{width:44px;height:44px;border-radius:14px;font-size:17px}.desktop-canvas .widget-card{padding:12px 14px}.desktop-canvas .clock-big{font-size:58px}}
+@media(max-width:700px){.desktop-page{padding:0 13px}.desktop-canvas{--tile-row:75px;--tile-gap:9px}.desktop-canvas .weather-degree{font-size:38px}.desktop-canvas .weather-bottom{margin-top:3px!important}}
+@media(max-width:700px) and (max-height:740px){.desktop-canvas{--tile-row:58px;--tile-gap:6px}.desktop-canvas .app-icon{width:42px;height:42px;border-radius:13px;font-size:16px}.desktop-canvas .app-shortcut>a{gap:3px}.desktop-canvas .app-name{font-size:9px}.desktop-canvas .widget-card[data-type="clock"] .clock-big{font-size:40px}}
+@media(max-width:700px) and (max-height:620px){.desktop-canvas{--tile-row:50px;--tile-gap:5px}.desktop-canvas .app-icon{width:36px;height:36px;border-radius:11px;font-size:14px}.desktop-canvas .widget-card[data-type="clock"] .clock-big{font-size:35px}.desktop-canvas .widget-card[data-type="calendar"] .calendar-days{line-height:12px}}
+
+.app-context-menu{position:fixed;z-index:25;width:232px;max-height:calc(100dvh - 16px);overflow-y:auto;padding:7px;border:1px solid rgba(255,255,255,.88);border-radius:18px;background:rgba(250,253,251,.96);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);box-shadow:0 22px 58px rgba(34,63,68,.25);color:#2f5057}
+.app-context-menu[hidden]{display:none}
+.context-title{display:flex;align-items:center;gap:9px;padding:8px 9px 10px;font-size:12px;font-weight:800;border-bottom:1px solid #e6eeeb;margin-bottom:4px}
+.context-title .tiny-app-icon{width:28px;height:28px;border-radius:8px}
+.context-action{display:flex;align-items:center;gap:10px;width:100%;border:0;border-radius:9px;background:transparent;color:#365a60;text-align:left;padding:8px 9px;font-size:12px}
+.context-action:hover,.context-page-choice:hover{background:#e8f3f0}
+.context-action.danger{color:#bd605e}
+.context-glyph{width:18px;text-align:center;font-size:15px}
+.context-page-group{border-top:1px solid #e6eeeb;border-bottom:1px solid #e6eeeb;margin:4px 0;padding:9px 8px}
+.context-group-label{display:block;margin-bottom:7px;font-size:10px;letter-spacing:.08em;color:#81989a;font-weight:800}
+.context-page-choices{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.context-page-choice{border:0;border-radius:8px;background:#f0f6f4;color:#496b70;padding:7px 3px;font-size:10px;white-space:nowrap}
+.context-page-choice.active{background:#dcece8;color:#2e6a70;font-weight:800}
+.context-page-choice:disabled{cursor:default}

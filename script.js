@@ -88,6 +88,9 @@
   let dragState = null;
   let dockDrag = null;
   let suppressClickUntil = 0;
+  let viewPages = [];
+  let rowsPerPage = 7;
+  let resizeFrame = 0;
   const music = { context: null, timer: null, frame: null, playing: false, track: 0, elapsed: 0, lastTick: 0, lastNote: -1 };
 
   function save() {
@@ -127,6 +130,50 @@
     save();
     window.open(app.url, '_blank', 'noopener,noreferrer');
   }
+  function closeAppContext() { const menu=$('#appContextMenu');menu.hidden=true;menu.replaceChildren(); }
+  function openAppContext(appId,x,y) {
+    const app=appById(appId);if(!app)return;
+    const menu=$('#appContextMenu');menu.replaceChildren();menu.hidden=false;
+    const title=el('div','context-title');title.append(appIcon(app,true),el('span','',app.name));menu.append(title);
+    const action=(label,icon,handler,danger=false)=>{
+      const button=el('button',`context-action${danger?' danger':''}`);button.type='button';button.setAttribute('role','menuitem');
+      button.append(el('span','context-glyph',icon),el('span','',label));
+      button.addEventListener('click',()=>{closeAppContext();handler();});menu.append(button);
+    };
+    action('打开网站','↗',()=>openApp(app));
+    action('编辑快捷方式','✎',()=>openEditor('app',app.id));
+    action('复制链接','⧉',async()=>{
+      try { await navigator.clipboard.writeText(app.url);toast('链接已复制'); }
+      catch { toast('复制失败，请检查浏览器权限'); }
+    });
+    const inDock=state.dock.includes(app.id);
+    action(inDock?'从 Dock 移除':'加入 Dock',inDock?'−':'+',()=>{
+      if(inDock)state.dock=state.dock.filter(id=>id!==app.id);
+      else if(state.dock.length>=12)return toast('Dock 最多放 12 个 App');
+      else state.dock.push(app.id);
+      save();renderDock();toast(inDock?'已从 Dock 移除':'已加入 Dock');
+    });
+    const group=el('div','context-page-group');group.append(el('span','context-group-label','移动到桌面'));
+    const pageChoices=el('div','context-page-choices');
+    state.pages.forEach(page=>{
+      const button=el('button',`context-page-choice${app.page===page.id?' active':''}`,page.name);button.type='button';button.setAttribute('role','menuitem');
+      button.disabled=app.page===page.id;
+      button.addEventListener('click',()=>{closeAppContext();app.page=page.id;
+        for(const mode of ['desktop','tablet','mobile'])delete state.layout[mode][app.id];
+        save();renderPages();toast(`已移动到${page.name}`);
+      });pageChoices.append(button);
+    });group.append(pageChoices);menu.append(group);
+    action('删除快捷方式','×',()=>{if(!confirm(`删除“${app.name}”快捷方式？`))return;
+      state.apps=state.apps.filter(item=>item.id!==app.id);state.dock=state.dock.filter(id=>id!==app.id);
+      state.history=state.history.filter(id=>id!==app.id);
+      for(const mode of ['desktop','tablet','mobile'])delete state.layout[mode][app.id];
+      save();renderPages();renderDock();toast('快捷方式已删除');
+    },true);
+    menu.style.left='0px';menu.style.top='0px';
+    const rect=menu.getBoundingClientRect();
+    menu.style.left=`${Math.max(8,Math.min(x,innerWidth-rect.width-8))}px`;
+    menu.style.top=`${Math.max(8,Math.min(y,innerHeight-rect.height-8))}px`;
+  }
   function setWallpaper() {
     const wall = $('#wallpaper'); wall.dataset.wallpaper = state.wallpaper;
     wall.style.backgroundImage = state.wallpaper === 'custom' && state.customWallpaper ? `url("${state.customWallpaper}")` : '';
@@ -141,6 +188,16 @@
   }
   function layoutMode() { return innerWidth <= 700 ? 'mobile' : innerWidth <= 1100 ? 'tablet' : 'desktop'; }
   function gridColumns(mode) { return mode === 'mobile' ? 4 : mode === 'tablet' ? 8 : 12; }
+  function gridMetric(mode) {
+    if (mode === 'mobile') return innerHeight <= 620 ? {row:50,gap:5} : innerHeight <= 740 ? {row:58,gap:6} : {row:75,gap:9};
+    if (innerHeight <= 680) return {row:65,gap:8};
+    return mode === 'tablet' ? {row:76,gap:10} : {row:78,gap:12};
+  }
+  function availableRows(mode) {
+    const viewport=$('#desktopViewport');
+    const {row,gap}=gridMetric(mode), heading=mode==='mobile'?34:39;
+    return Math.max(3,Math.floor((viewport.clientHeight-heading+gap-4)/(row+gap)));
+  }
   function tileSize(item, mode) {
     if (item.kind === 'app') return { w: 1, h: 1 };
     const type = item.data.type;
@@ -153,30 +210,38 @@
     if (mode === 'tablet') return { w: type === 'clock' || item.data.size === 'wide' ? 4 : 2, h: type === 'calendar' || type === 'todo' ? 3 : 2 };
     return { w: type === 'clock' || item.data.size === 'wide' ? 4 : item.data.size === 'small' ? 2 : 3, h: type === 'calendar' || type === 'todo' ? 3 : 2 };
   }
-  function pageItems(pageId, mode) {
+  function pageItems(pageId, mode, maxRows=rowsPerPage) {
     const widgets = state.widgets.filter(item => item.page === pageId).map(data => ({ kind: 'widget', data, id: data.id }));
     const apps = state.apps.filter(item => item.page === pageId).map(data => ({ kind: 'app', data, id: data.id }));
     if (mode === 'mobile') {
-      const prominent = widgets.filter(item => ['clock','weather','todo','player','watching'].includes(item.data.type));
+      const priorityTypes=maxRows<=6?['clock']:['clock','weather','todo','player','watching'];
+      const prominent = widgets.filter(item => priorityTypes.includes(item.data.type));
       const rest = widgets.filter(item => !prominent.includes(item));
       return [...prominent, ...apps, ...rest];
     }
+    if (maxRows<=5) {
+      const prominent=widgets.filter(item => ['clock','weather','todo','progress','watching','player'].includes(item.data.type));
+      return [...prominent,...apps,...widgets.filter(item=>!prominent.includes(item))];
+    }
     return [...widgets, ...apps];
   }
-  function layoutPage(pageId, mode) {
+  function layoutPage(pageId, mode, maxRows) {
     const columns = gridColumns(mode), occupied = new Set(), positions = new Map();
     const saved = state.layout[mode];
-    const items = pageItems(pageId, mode).sort((a,b) => (Number(saved[b.id]?.priority)||0) - (Number(saved[a.id]?.priority)||0));
+    const items = pageItems(pageId, mode,maxRows).sort((a,b) => (Number(saved[b.id]?.priority)||0) - (Number(saved[a.id]?.priority)||0));
+    const area=items.reduce((sum,item)=>{const {w,h}=tileSize(item,mode);return sum+w*h;},0);
+    const usefulRowLimit=Math.ceil(area/columns)+maxRows;
     const canFit = (x,y,w,h) => {
-      if (x < 0 || y < 0 || x + w > columns) return false;
+      if (x < 0 || y < 0 || x + w > columns || y%maxRows+h>maxRows) return false;
       for (let row=y;row<y+h;row++) for(let col=x;col<x+w;col++) if(occupied.has(`${col},${row}`)) return false;
       return true;
     };
     items.forEach(item => {
       const {w,h} = tileSize(item,mode), pref = saved[item.id]?.page === pageId ? saved[item.id] : null;
       let x = Number(pref?.x), y = Number(pref?.y);
+      if (y>usefulRowLimit) y=NaN;
       if (!Number.isInteger(x) || !Number.isInteger(y) || !canFit(x,y,w,h)) {
-        outer: for(y=0;y<120;y++) for(x=0;x<=columns-w;x++) if(canFit(x,y,w,h)) break outer;
+        outer: for(y=0;y<Math.max(120,usefulRowLimit+maxRows);y++) for(x=0;x<=columns-w;x++) if(canFit(x,y,w,h)) break outer;
       }
       positions.set(item.id,{x,y,w,h});
       for(let row=y;row<y+h;row++) for(let col=x;col<x+w;col++) occupied.add(`${col},${row}`);
@@ -184,32 +249,45 @@
     return positions;
   }
   function renderPages() {
-    const track = $('#pageTrack'); track.replaceChildren();
-    const mode = layoutMode();
-    state.pages.forEach((page,index) => {
-      const section = el('section','desktop-page'); section.dataset.page = page.id; section.setAttribute('aria-label',page.name);
-      const inner = el('div','page-inner');
-      const heading = el('div','desktop-heading'); heading.append(el('span','desktop-heading-name',page.name),el('span','desktop-heading-hint',`${state.apps.filter(app=>app.page===page.id).length} 个 App · 拖动以整理`)); inner.append(heading);
-      const canvas = el('div','desktop-canvas'); canvas.dataset.page = page.id; canvas.dataset.mode = mode;
-      const positions = layoutPage(page.id,mode);
-      pageItems(page.id,mode).forEach(item => {
-        const node = item.kind === 'app' ? renderApp(item.data) : renderWidget(item.data);
-        const pos = positions.get(item.id); node.style.gridColumn = `${pos.x+1} / span ${pos.w}`; node.style.gridRow = `${pos.y+1} / span ${pos.h}`;
-        node.dataset.kind = item.kind; node.dataset.page = page.id; canvas.append(node);
-      });
-      inner.append(canvas); section.append(inner); track.append(section);
+    closeAppContext();
+    const track = $('#pageTrack'), previous=viewPages[currentPage]; track.replaceChildren();
+    const mode = layoutMode(); rowsPerPage=availableRows(mode); viewPages=[];
+    state.pages.forEach(page => {
+      const positions=layoutPage(page.id,mode,rowsPerPage), items=pageItems(page.id,mode,rowsPerPage);
+      const segments=Math.max(1,...[...positions.values()].map(pos=>Math.floor(pos.y/rowsPerPage)+1));
+      for(let segment=0;segment<segments;segment++) {
+        const pageItemsInSegment=items.filter(item=>Math.floor(positions.get(item.id).y/rowsPerPage)===segment);
+        const view={pageId:page.id,name:page.name,segment,total:segments};viewPages.push(view);
+        const section=el('section','desktop-page');section.dataset.page=page.id;section.dataset.segment=String(segment);
+        section.setAttribute('aria-label',segments>1?`${page.name}，第 ${segment+1} 屏`:page.name);
+        const inner=el('div','page-inner'),heading=el('div','desktop-heading');
+        const appCount=pageItemsInSegment.filter(item=>item.kind==='app').length;
+        heading.append(el('span','desktop-heading-name',segments>1?`${page.name} · ${segment+1}/${segments}`:page.name),
+          el('span','desktop-heading-hint',appCount?`${appCount} 个 App · 右键管理`:`${pageItemsInSegment.length} 个 Widget · 左右切换`));
+        inner.append(heading);
+        const canvas=el('div','desktop-canvas');canvas.dataset.page=page.id;canvas.dataset.segment=String(segment);canvas.dataset.mode=mode;
+        pageItemsInSegment.forEach(item=>{
+          const node=item.kind==='app'?renderApp(item.data):renderWidget(item.data),pos=positions.get(item.id);
+          node.style.gridColumn=`${pos.x+1} / span ${pos.w}`;
+          node.style.gridRow=`${pos.y%rowsPerPage+1} / span ${pos.h}`;
+          node.dataset.kind=item.kind;node.dataset.page=page.id;canvas.append(node);
+        });
+        inner.append(canvas);section.append(inner);track.append(section);
+      }
     });
+    if(previous){const match=viewPages.findIndex(view=>view.pageId===previous.pageId&&view.segment===previous.segment);currentPage=match>=0?match:Math.min(currentPage,viewPages.length-1);}
     renderDots(); updateClock(); setPage(currentPage,false);
     $('#desktopShell').classList.toggle('editing',editing);
   }
   function renderDots() {
     const dots = $('#pageDots'); dots.replaceChildren();
-    state.pages.forEach((page,index) => { const button = el('button'); button.type = 'button'; button.title = page.name; button.setAttribute('aria-label',`切换到${page.name}`); button.addEventListener('click',() => setPage(index)); dots.append(button); });
+    viewPages.forEach((view,index) => { const button = el('button'); button.type = 'button'; button.title = view.total>1?`${view.name} ${view.segment+1}/${view.total}`:view.name; button.setAttribute('aria-label',`切换到${button.title}`); button.addEventListener('click',() => setPage(index)); dots.append(button); });
   }
   function setPage(index, animate = true) {
-    currentPage = Math.max(0,Math.min(state.pages.length-1,index));
+    currentPage = Math.max(0,Math.min(viewPages.length-1,index));closeAppContext();
     const track = $('#pageTrack');
-    $('#topPageName').textContent = state.pages[currentPage].name;
+    const view=viewPages[currentPage];
+    $('#topPageName').textContent = view.name;
     if (!animate) { track.classList.add('dragging'); requestAnimationFrame(() => track.classList.remove('dragging')); }
     track.style.transform = `translate3d(${-currentPage*100}%,0,0)`;
     [...$('#pageDots').children].forEach((dot,i) => { dot.classList.toggle('active',i===currentPage); dot.setAttribute('aria-current',String(i===currentPage)); });
@@ -224,7 +302,9 @@
       state.history = [app.id,...state.history.filter(id=>id!==app.id)].slice(0,12); save();
     });
     const edit = el('button','app-edit','✎'); edit.type='button'; edit.title=`编辑 ${app.name}`; edit.addEventListener('click',() => openEditor('app',app.id));
-    wrap.append(link,edit); attachDrag(wrap,'app',app.id); return wrap;
+    wrap.append(link,edit); attachDrag(wrap,'app',app.id);
+    wrap.addEventListener('contextmenu',event=>{event.preventDefault();openAppContext(app.id,event.clientX,event.clientY);});
+    return wrap;
   }
   function renderWidget(widget) {
     const card = el('article','widget-card'); card.dataset.id=widget.id; card.dataset.type=widget.type; card.dataset.size=widget.size;
@@ -321,7 +401,7 @@
   }
   function renderDock() {
     const dock=$('#dock');dock.replaceChildren();
-    state.dock.forEach(id=>{const app=appById(id);if(!app)return;const button=el('button','dock-app');button.type='button';button.dataset.id=id;button.title=app.name;button.setAttribute('aria-label',`打开 ${app.name}`);button.append(appIcon(app),el('span','dock-tooltip',app.name));button.addEventListener('click',event=>{if(Date.now()<suppressClickUntil){event.preventDefault();return;}openApp(app);});dock.append(button);});
+    state.dock.forEach(id=>{const app=appById(id);if(!app)return;const button=el('button','dock-app');button.type='button';button.dataset.id=id;button.title=app.name;button.setAttribute('aria-label',`打开 ${app.name}`);button.append(appIcon(app),el('span','dock-tooltip',app.name));button.addEventListener('click',event=>{if(Date.now()<suppressClickUntil){event.preventDefault();return;}openApp(app);});button.addEventListener('contextmenu',event=>{event.preventDefault();openAppContext(app.id,event.clientX,event.clientY);});dock.append(button);});
     dock.append(el('span','dock-divider'));
     const more=el('button','dock-more','⋯');more.type='button';more.title='更多与设置';more.setAttribute('aria-label','更多与设置');more.addEventListener('click',openSettings);dock.append(more);
     dock.querySelectorAll('.dock-app').forEach((button,index,all)=>{
@@ -383,15 +463,16 @@
     drag.node.classList.remove('is-dragging'); drag.ghost?.remove(); $('#desktopShell').classList.remove('drag-active');
     suppressClickUntil=Date.now()+450;
     if (canceled) return;
-    const pageId=state.pages[currentPage].id;
-    const canvas=document.querySelector(`.desktop-canvas[data-page="${pageId}"]`); if (!canvas) return;
+    const view=viewPages[currentPage],pageId=view.pageId;
+    const canvas=$('.desktop-canvas',$('#pageTrack').children[currentPage]); if (!canvas) return;
     const mode=layoutMode(), columns=gridColumns(mode), item={kind:drag.type,data:drag.type==='app'?appById(drag.id):state.widgets.find(w=>w.id===drag.id)};
     if (!item.data) return;
-    const {w}=tileSize(item,mode), rect=canvas.getBoundingClientRect(), style=getComputedStyle(canvas);
+    const {w,h}=tileSize(item,mode), rect=canvas.getBoundingClientRect(), style=getComputedStyle(canvas);
     const gap=parseFloat(style.columnGap)||0, pitchX=(rect.width-gap*(columns-1))/columns+gap;
     const pitchY=parseFloat(style.gridAutoRows)+ (parseFloat(style.rowGap)||0);
     const x=Math.max(0,Math.min(columns-w,Math.round((event.clientX-drag.offsetX-rect.left)/pitchX)));
-    const y=Math.max(0,Math.min(110,Math.round((event.clientY-drag.offsetY-rect.top)/pitchY)));
+    const localY=Math.max(0,Math.min(rowsPerPage-h,Math.round((event.clientY-drag.offsetY-rect.top)/pitchY)));
+    const y=view.segment*rowsPerPage+localY;
     item.data.page=pageId;
     state.layout[mode][drag.id]={page:pageId,x,y,priority:Date.now()};
     save(); renderPages(); toast('位置已保存');
@@ -406,6 +487,7 @@
     toast(editing?'整理模式：拖动 App 或卡片，点击 ✎ 编辑':'桌面布局已保存');
   }
   function searchOpen() {
+    closeAppContext();
     $('#searchOverlay').classList.add('open');$('#searchOverlay').setAttribute('aria-hidden','false');$('#searchInput').value='';selectedSearch=0;renderSearch();setTimeout(()=>$('#searchInput').focus(),70);
   }
   function searchClose() {$('#searchOverlay').classList.remove('open');$('#searchOverlay').setAttribute('aria-hidden','true');$('#searchTrigger').focus();}
@@ -435,7 +517,7 @@
     const looksLikeDomain=/^(?:[\w-]+\.)+[a-z]{2,}(?:\/\S*)?$/i.test(query);
     window.open(looksLikeDomain&&url?url:engines.find(e=>e.id===activeEngine).url+encodeURIComponent(query),'_blank','noopener,noreferrer');searchClose();
   }
-  function openSettings() {settingsTab='apps';renderSettings();$('#settingsDialog').showModal();}
+  function openSettings() {closeAppContext();settingsTab='apps';renderSettings();$('#settingsDialog').showModal();}
   function closeSettings() {$('#settingsDialog').close();}
   function renderSettings() {
     $('#settingsTabs').querySelectorAll('button').forEach(button=>button.classList.toggle('active',button.dataset.tab===settingsTab));
@@ -527,10 +609,10 @@
     const root=$('#editorFields');root.replaceChildren();const fields={};
     const add=(key,label,value,inputType='text',options)=>{const entry=field(label,value,inputType,options);entry.input.name=key;root.append(entry.wrap);fields[key]=entry.input;};
     if(type==='app'){
-      add('name','名称',item?.name||'');add('url','网站 URL',item?.url||'https://','url');add('icon','图标字符 / 图片 URL',item?.icon||'✦');add('color','图标背景色',item?.color||'#6c9ca4','color');add('category','分类',item?.category||'常用');add('page','桌面页面',item?.page||state.pages[currentPage].id,'select',state.pages.map(page=>[page.id,page.name]));
+      add('name','名称',item?.name||'');add('url','网站 URL',item?.url||'https://','url');add('icon','图标字符 / 图片 URL',item?.icon||'✦');add('color','图标背景色',item?.color||'#6c9ca4','color');add('category','分类',item?.category||'常用');add('page','桌面页面',item?.page||viewPages[currentPage].pageId,'select',state.pages.map(page=>[page.id,page.name]));
     }else{
       add('type','Widget 类型',item?.type||'note','select',['clock','note','link','todo','calendar','quote','weather','progress','recent','favorites','watching','player','quick'].map(t=>[t,widgetLabel(t)]));
-      add('title','标题',item?.title||'');add('content','内容 / 链接',item?.content||'','textarea');add('size','卡片尺寸',item?.size||'medium','select',[['small','小'],['medium','标准'],['wide','宽']]);add('page','桌面页面',item?.page||state.pages[currentPage].id,'select',state.pages.map(page=>[page.id,page.name]));
+      add('title','标题',item?.title||'');add('content','内容 / 链接',item?.content||'','textarea');add('size','卡片尺寸',item?.size||'medium','select',[['small','小'],['medium','标准'],['wide','宽']]);add('page','桌面页面',item?.page||viewPages[currentPage].pageId,'select',state.pages.map(page=>[page.id,page.name]));
     }
     editorContext.fields=fields;$('#editorDialog').showModal();fields.name?.focus();
   }
@@ -598,15 +680,14 @@
   $('#editorForm').addEventListener('submit',event=>{event.preventDefault();saveEditor();});
   document.addEventListener('keydown',event=>{
     if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'){event.preventDefault();searchOpen();return;}
+    if(event.key==='Escape'&&!$('#appContextMenu').hidden){closeAppContext();return;}
     if(event.key==='Escape'&&$('#searchOverlay').classList.contains('open')){searchClose();return;}
     if(document.activeElement?.matches('input,textarea,select')||$('#settingsDialog').open||$('#editorDialog').open||$('#searchOverlay').classList.contains('open'))return;
     if(event.key==='ArrowRight')setPage(currentPage+1);if(event.key==='ArrowLeft')setPage(currentPage-1);
   });
   $('#desktopViewport').addEventListener('wheel',event=>{
-    if($('#settingsDialog').open||$('#searchOverlay').classList.contains('open')||editing)return;
+    if($('#settingsDialog').open||$('#searchOverlay').classList.contains('open'))return;
     if(Math.abs(event.deltaX)+Math.abs(event.deltaY)<15)return;
-    const page=$('#pageTrack').children[currentPage];
-    if (Math.abs(event.deltaY)>Math.abs(event.deltaX) && page && page.scrollHeight>page.clientHeight+3 && !event.shiftKey) return;
     if(Date.now()-wheelAt<550){event.preventDefault();return;}
     wheelAt=Date.now();event.preventDefault();setPage(currentPage+(Math.abs(event.deltaX)>Math.abs(event.deltaY)?Math.sign(event.deltaX):Math.sign(event.deltaY)));
   },{passive:false});
@@ -620,13 +701,10 @@
     event.preventDefault(); drag.ghost.style.left=`${event.clientX-drag.offsetX}px`;drag.ghost.style.top=`${event.clientY-drag.offsetY}px`;
     const edge=event.clientX<38?-1:event.clientX>innerWidth-38?1:0;
     const destination=currentPage+edge;
-    if(edge && destination>=0 && destination<state.pages.length){
+    if(edge && destination>=0 && destination<viewPages.length){
       if(drag.edgeDestination!==destination){clearTimeout(drag.edgeTimer);drag.edgeDestination=destination;
         drag.edgeTimer=setTimeout(()=>{if(dragState===drag){setPage(destination);drag.edgeDestination=null;}},560);}
     }else{clearTimeout(drag.edgeTimer);drag.edgeDestination=null;}
-    const page=$('#pageTrack').children[currentPage]; const rect=page?.getBoundingClientRect();
-    if(rect && event.clientY>rect.bottom-35)page.scrollTop+=14;
-    else if(rect && event.clientY<rect.top+35)page.scrollTop-=14;
   },{passive:false});
   window.addEventListener('pointerup',event=>stopTileDrag(event));
   window.addEventListener('pointercancel',event=>stopTileDrag(event,true));
@@ -637,8 +715,9 @@
   function finishPointer(event){if(!pointerStart||pointerStart.id!==event.pointerId)return;if(dragState?.active){pointerStart=null;$('#pageTrack').classList.remove('dragging');setPage(currentPage);return;}const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y;$('#pageTrack').classList.remove('dragging');if(Math.abs(dx)>55&&Math.abs(dx)>Math.abs(dy)*1.2){suppressClickUntil=Date.now()+400;setPage(pointerStart.page+(dx<0?1:-1));}else setPage(pointerStart.page);pointerStart=null;}
   viewport.addEventListener('pointerup',finishPointer);viewport.addEventListener('pointercancel',finishPointer);
   viewport.addEventListener('click',event=>{if(Date.now()<suppressClickUntil){event.preventDefault();event.stopPropagation();}},true);
-  let lastMode=layoutMode();
-  window.addEventListener('resize',()=>{const next=layoutMode();if(next!==lastMode){lastMode=next;renderPages();}});
+  document.addEventListener('pointerdown',event=>{const menu=$('#appContextMenu');if(!menu.hidden&&!menu.contains(event.target))closeAppContext();},true);
+  document.addEventListener('contextmenu',event=>{const menu=$('#appContextMenu');if(!menu.hidden&&!event.target.closest('.app-shortcut,.dock-app'))closeAppContext();});
+  window.addEventListener('resize',()=>{cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(renderPages);});
 
   setWallpaper();renderPages();renderDock();loadWeather();updateClock();setInterval(updateClock,30000);
 })();
