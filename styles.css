@@ -85,6 +85,7 @@ dialog{border:0;padding:0;max-width:none;max-height:none;color:var(--ink)}dialog
 /* A desktop page is a single screen. Extra tiles continue on the next horizontal screen. */
 .desktop-viewport,.desktop-canvas .app-shortcut,.desktop-canvas .widget-card{touch-action:none}
 .desktop-page{overflow:hidden;padding-bottom:0;overscroll-behavior:none}
+.draft-page .desktop-canvas{outline:1px dashed rgba(255,255,255,.6);outline-offset:-1px;border-radius:24px;background:rgba(255,255,255,.07)}
 .page-inner{height:100%;display:flex;flex-direction:column}
 .desktop-canvas{--tile-row:78px;--tile-gap:12px;flex:1;min-height:0;padding-bottom:0;grid-auto-rows:var(--tile-row);gap:var(--tile-gap)}
 @media(max-width:1100px){.desktop-canvas{--tile-row:76px;--tile-gap:10px}.desktop-canvas .weather-degree{font-size:46px}.desktop-canvas .weather-bottom{margin-top:5px!important}}
@@ -236,6 +237,8 @@ dialog{border:0;padding:0;max-width:none;max-height:none;color:var(--ink)}dialog
 }
 
 /* Free-form folders: complete cells, direct launch, and an explicit overflow entry. */
+*{scrollbar-width:none!important;-ms-overflow-style:none}
+*::-webkit-scrollbar{display:none;width:0;height:0}
 [hidden]{display:none!important}
 .top-tool{display:flex;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.7);border-radius:20px;padding:9px 13px;background:rgba(255,255,255,.5);color:#355e65;font-size:11px;backdrop-filter:blur(16px);transition:background .2s,transform .2s}
 .top-tool:hover{background:rgba(255,255,255,.85);transform:translateY(-2px)}

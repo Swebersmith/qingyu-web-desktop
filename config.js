@@ -1,6 +1,6 @@
 /* 默认桌面配置。结构保持为纯 JSON 数据，方便增删快捷方式。 */
 window.DEFAULT_DESKTOP_CONFIG = {
-  version: 4,
+  version: 5,
   folders: [],
   searchLabel: "搜索 App、网站或直接上网",
   searchEngine: "google",

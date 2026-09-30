@@ -1,4 +1,5 @@
 import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
+import {normalizePages, reconcileDesktop} from './desktop-model.js';
 
 (() => {
   'use strict';
@@ -7,7 +8,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
   const defaults = window.DEFAULT_DESKTOP_CONFIG;
   const $ = (selector, root = document) => root.querySelector(selector);
   const clone = value => JSON.parse(JSON.stringify(value));
-  const pageIds = defaults.pages.map(page => page.id);
+  const defaultPageIds = defaults.pages.map(page => page.id);
   const newDefaultAppIds = new Set(['x','telegram','baidu','douban','maps','taobao','mooc','coursera','arxiv','wikipedia','deepl','keep','qqmusic','twitch','doubanmovie','doubanmusic','bilibangumi','epic','stackoverflow','mdn','codepen','vercel','unsplash','tinypng']);
   const quotes = [
     '生活嘛，就是要开心一点。',
@@ -35,7 +36,8 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
   function normalize(raw) {
     if (!raw || typeof raw !== 'object') raw = clone(defaults);
     const data = { ...clone(defaults), ...raw };
-    data.pages = clone(defaults.pages);
+    data.pages = normalizePages(raw.pages,defaults.pages);
+    const pageIds=data.pages.map(page=>page.id),fallbackPage=pageIds[0];
     const sourceApps = Array.isArray(raw.apps) ? [...raw.apps] : [...defaults.apps];
     if (!sourceApps.some(app=>app?.id==='weboss-settings')) sourceApps.push(defaults.apps.find(app=>app.id==='weboss-settings'));
     if ((Number(raw.version) || 1) < 2) defaults.apps.forEach(app => { if (newDefaultAppIds.has(app.id) && !sourceApps.some(item => item.id === app.id)) sourceApps.push(app); });
@@ -44,12 +46,12 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
       url: validUrl(item.url), system: item.id==='weboss-settings'?'settings':undefined, icon: String(item.icon || '✦').slice(0, 180),
       iconMode: item.iconMode === 'custom' || (!item.iconMode && (!defaults.apps.some(app => app.id === item.id && app.icon === item.icon) && item.id)) ? 'custom' : 'auto',
       color: /^#[\da-f]{6}$/i.test(item.color) ? item.color : '#6c9ca4',
-      page: pageIds.includes(item.page) ? item.page : 'home'
+      page: pageIds.includes(item.page) ? item.page : fallbackPage
     }));
     const grouped = new Set();
     data.folders = (Array.isArray(raw.folders)?raw.folders:[]).filter(Boolean).map(item=>({
       id:String(item.id||crypto.randomUUID()),name:String(item.name||'文件夹').slice(0,32),
-      page:pageIds.includes(item.page)?item.page:'home',sizes:item.sizes&&typeof item.sizes==='object'?item.sizes:{},
+      page:pageIds.includes(item.page)?item.page:fallbackPage,sizes:item.sizes&&typeof item.sizes==='object'?item.sizes:{},
       appIds:(Array.isArray(item.appIds)?item.appIds:[]).filter(id=>{
         const app=data.apps.find(app=>app.id===id);if(!app||app.system||grouped.has(id))return false;
         grouped.add(id);return true;
@@ -60,7 +62,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     if ((Number(raw.version) || 1) < 2 && !sourceWidgets.some(item => item.id === 'clock')) sourceWidgets.unshift(defaults.widgets[0]);
     data.widgets = sourceWidgets.filter(Boolean).map(item => ({
       id: String(item.id || crypto.randomUUID()), type: String(item.type || 'note'),
-      page: pageIds.includes(item.page) ? item.page : 'home',
+      page: pageIds.includes(item.page) ? item.page : fallbackPage,
       size: ['small','medium','wide'].includes(item.size) ? item.size : 'medium',
       title: String(item.title || '').slice(0, 40), content: String(item.content || '').slice(0, 400)
     }));
@@ -80,6 +82,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     data.layout = raw.layout && typeof raw.layout === 'object' ? raw.layout : { desktop: {}, tablet: {}, mobile: {} };
     for (const mode of ['desktop','tablet','mobile']) if (!data.layout[mode] || typeof data.layout[mode] !== 'object') data.layout[mode] = {};
     data.version = defaults.version;
+    reconcileDesktop(data);
     return data;
   }
   let stored = null;
@@ -122,6 +125,11 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
   const music = { context: null, timer: null, frame: null, playing: false, track: 0, elapsed: 0, lastTick: 0, lastNote: -1 };
 
   function save() {
+    const mode=layoutMode(),live={ [mode]:{} };
+    document.querySelectorAll('.desktop-canvas>.folder-tile').forEach(node=>{live[mode][node.dataset.id]={page:node.dataset.page,...tilePosition(node),priority:Number(state.layout[mode][node.dataset.id]?.priority)||1};});
+    const result=reconcileDesktop(state,viewPages[currentPage]?.pageId,live);
+    if(folderId&&result.dissolved.includes(folderId))closeFolder();
+    if(result.dissolved.includes(sizingFolderId))sizingFolderId=null;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch { toast('浏览器存储空间不足，请导出配置备份'); }
   }
@@ -139,6 +147,10 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
   function folderById(id) { return state.folders.find(folder=>folder.id===id); }
   function folderOfApp(id) { return state.folders.find(folder=>folder.appIds.includes(id)); }
   function removeFromFolders(id) { state.folders.forEach(folder=>folder.appIds=folder.appIds.filter(appId=>appId!==id)); }
+  function unpinApp(id,page=viewPages[currentPage]?.pageId) {
+    if(!state.dock.includes(id))return;
+    state.dock=state.dock.filter(appId=>appId!==id);const app=appById(id);if(app){app.page=state.pages.some(item=>item.id===page)?page:state.pages[0].id;clearAppLayout(id);}
+  }
   function itemById(type,id) { return type==='app'?appById(id):type==='folder'?folderById(id):state.widgets.find(widget=>widget.id===id); }
   function refreshDesktop() { save();renderPages();renderDock();if(folderId)renderFolderContents();if($('#settingsDialog').open)renderSettings(); }
   function isLightColor(hex) {
@@ -210,10 +222,10 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     });
     const inDock=state.dock.includes(id);
     if(type==='app')action(inDock?'从 Dock 移除':'加入 Dock',inDock?'−':'+',()=>{
-      if(inDock)state.dock=state.dock.filter(appId=>appId!==id);
+      if(inDock)unpinApp(id);
       else if(state.dock.length>=12)return toast('Dock 最多放 12 个 App');
       else state.dock.push(id);
-      save();renderDock();toast(inDock?'已从 Dock 移除':'已加入 Dock');
+      refreshDesktop();toast(inDock?'已放回当前桌面':'已加入 Dock');
     });
     if(type==='app'&&!item.system){
       action('多选 / 批量整理','☑',()=>openOrganizer('bulk',id));
@@ -221,7 +233,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
       if(folder)action('移出文件夹','↗',()=>{removeFromFolders(id);refreshDesktop();});
       const choices=el('div','context-folder-choices');
       state.folders.filter(entry=>entry.id!==folder?.id).forEach(entry=>{
-        const button=el('button','context-action',`▦  移入 ${entry.name}`);button.type='button';button.addEventListener('click',()=>{closeAppContext();removeFromFolders(id);entry.appIds.push(id);item.page=entry.page;refreshDesktop();});choices.append(button);
+        const button=el('button','context-action',`▦  移入 ${entry.name}`);button.type='button';button.addEventListener('click',()=>{closeAppContext();unpinApp(id,entry.page);removeFromFolders(id);entry.appIds.push(id);item.page=entry.page;refreshDesktop();});choices.append(button);
       });menu.append(choices);
       action('新建文件夹并移入','+',()=>createFolder([id],item.page));
     }
@@ -236,9 +248,9 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     const pageChoices=el('div','context-page-choices');
     state.pages.forEach(page=>{
       const button=el('button',`context-page-choice${item.page===page.id?' active':''}`,page.name);button.type='button';button.setAttribute('role','menuitem');
-      button.disabled=item.page===page.id;
+      button.disabled=item.page===page.id&&!inDock;
       button.addEventListener('click',()=>{closeAppContext();item.page=page.id;
-        if(type==='app')removeFromFolders(id);
+        if(type==='app'){unpinApp(id,page.id);removeFromFolders(id);}
         if(type==='folder')item.appIds.forEach(appId=>appById(appId).page=page.id);
         for(const mode of ['desktop','tablet','mobile'])delete state.layout[mode][id];
         refreshDesktop();toast(`已移动到${page.name}`);
@@ -332,7 +344,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
   function pageItems(pageId, mode, maxRows=rowsPerPage) {
     const widgets = state.widgets.filter(item => item.page === pageId).map(data => ({ kind: 'widget', data, id: data.id }));
     const folders=state.folders.filter(item=>item.page===pageId).map(data=>({kind:'folder',data,id:data.id}));
-    const apps = state.apps.filter(item => item.page === pageId && !folderOfApp(item.id)).map(data => ({ kind: 'app', data, id: data.id }));
+    const apps = state.apps.filter(item => item.page === pageId && !state.dock.includes(item.id) && !folderOfApp(item.id)).map(data => ({ kind: 'app', data, id: data.id }));
     if (mode === 'mobile') {
       const priorityTypes=maxRows<=6?['clock']:['clock','weather','todo','player','watching'];
       const prominent = widgets.filter(item => priorityTypes.includes(item.data.type));
@@ -368,6 +380,36 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     });
     return positions;
   }
+  function appendDesktopView(page,segment,screenIndex,total,items,positions,mode,temporary=false) {
+    viewPages.push({pageId:page.id,name:page.name,segment,screenIndex,total,temporary});
+    const section=el('section',`desktop-page${temporary?' draft-page':''}`);section.dataset.page=page.id;section.dataset.segment=String(segment);
+    section.setAttribute('aria-label',total>1?`${page.name}，第 ${screenIndex+1} 屏`:page.name);
+    const inner=el('div','page-inner'),heading=el('div','desktop-heading');
+    const appCount=items.filter(item=>item.kind==='app').length;
+    heading.append(el('span','desktop-heading-name',total>1?`${page.name} · ${screenIndex+1}/${total}`:page.name),
+      el('span','desktop-heading-hint',temporary?'松手放到新桌面':appCount?`${appCount} 个 App · 右键管理`:items.length?`${items.length} 个组件 · 左右切换`:'拖入 App 或小组件，开始布置桌面'));
+    inner.append(heading);
+    const canvas=el('div','desktop-canvas');canvas.dataset.page=page.id;canvas.dataset.segment=String(segment);canvas.dataset.mode=mode;
+    items.forEach(item=>{
+      const node=item.kind==='app'?renderApp(item.data):item.kind==='folder'?renderFolderTile(item.data):renderWidget(item.data),pos=positions.get(item.id);
+      node.style.gridColumn=`${pos.x+1} / span ${pos.w}`;
+      node.style.gridRow=`${pos.y%rowsPerPage+1} / span ${pos.h}`;
+      node.dataset.kind=item.kind;node.dataset.page=page.id;canvas.append(node);
+    });
+    inner.append(canvas);section.append(inner);$('#pageTrack').append(section);return section;
+  }
+  function appendDraftPage(drag) {
+    if(drag.draftPage)return viewPages.findIndex(view=>view.pageId===drag.draftPage.id);
+    const page={id:crypto.randomUUID(),name:`桌面 ${state.pages.length+1}`,eyebrow:'YOUR SPACE',title:''};
+    drag.draftPage=page;
+    appendDesktopView(page,0,0,1,[],new Map(),layoutMode(),true);renderDots();return viewPages.length-1;
+  }
+  function discardDraftPage(drag) {
+    if(!drag.draftPage)return;
+    const index=viewPages.findIndex(view=>view.pageId===drag.draftPage.id);
+    if(index>=0){$('#pageTrack').children[index]?.remove();viewPages.splice(index,1);if(currentPage>=index)currentPage=Math.max(0,currentPage-1);renderDots();setPage(currentPage);}
+    drag.draftPage=null;
+  }
   function renderPages() {
     closeAppContext();
     folderResizeObserver.disconnect();
@@ -375,26 +417,12 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     const mode = layoutMode(); rowsPerPage=availableRows(mode); viewPages=[];
     state.pages.forEach(page => {
       const positions=layoutPage(page.id,mode,rowsPerPage), items=pageItems(page.id,mode,rowsPerPage);
-      const segments=Math.max(1,...[...positions.values()].map(pos=>Math.floor(pos.y/rowsPerPage)+1));
-      for(let segment=0;segment<segments;segment++) {
+      const segments=[...new Set([...positions.values()].map(pos=>Math.floor(pos.y/rowsPerPage)))].sort((a,b)=>a-b);
+      if(!segments.length)segments.push(0);
+      segments.forEach((segment,screenIndex)=>{
         const pageItemsInSegment=items.filter(item=>Math.floor(positions.get(item.id).y/rowsPerPage)===segment);
-        const view={pageId:page.id,name:page.name,segment,total:segments};viewPages.push(view);
-        const section=el('section','desktop-page');section.dataset.page=page.id;section.dataset.segment=String(segment);
-        section.setAttribute('aria-label',segments>1?`${page.name}，第 ${segment+1} 屏`:page.name);
-        const inner=el('div','page-inner'),heading=el('div','desktop-heading');
-        const appCount=pageItemsInSegment.filter(item=>item.kind==='app').length;
-        heading.append(el('span','desktop-heading-name',segments>1?`${page.name} · ${segment+1}/${segments}`:page.name),
-          el('span','desktop-heading-hint',appCount?`${appCount} 个 App · 右键管理`:`${pageItemsInSegment.length} 个 Widget · 左右切换`));
-        inner.append(heading);
-        const canvas=el('div','desktop-canvas');canvas.dataset.page=page.id;canvas.dataset.segment=String(segment);canvas.dataset.mode=mode;
-        pageItemsInSegment.forEach(item=>{
-          const node=item.kind==='app'?renderApp(item.data):item.kind==='folder'?renderFolderTile(item.data):renderWidget(item.data),pos=positions.get(item.id);
-          node.style.gridColumn=`${pos.x+1} / span ${pos.w}`;
-          node.style.gridRow=`${pos.y%rowsPerPage+1} / span ${pos.h}`;
-          node.dataset.kind=item.kind;node.dataset.page=page.id;canvas.append(node);
-        });
-        inner.append(canvas);section.append(inner);track.append(section);
-      }
+        appendDesktopView(page,segment,screenIndex,segments.length,pageItemsInSegment,positions,mode);
+      });
     });
     if(previous){const match=viewPages.findIndex(view=>view.pageId===previous.pageId&&view.segment===previous.segment);currentPage=match>=0?match:Math.min(currentPage,viewPages.length-1);}
     renderDots(); updateClock(); setPage(currentPage,false);
@@ -403,7 +431,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
   }
   function renderDots() {
     const dots = $('#pageDots'); dots.replaceChildren();
-    viewPages.forEach((view,index) => { const button = el('button'); button.type = 'button'; button.title = view.total>1?`${view.name} ${view.segment+1}/${view.total}`:view.name; button.setAttribute('aria-label',`切换到${button.title}`); button.addEventListener('click',() => setPage(index)); dots.append(button); });
+    viewPages.forEach((view,index) => { const button = el('button'); button.type = 'button'; button.title = view.total>1?`${view.name} ${view.screenIndex+1}/${view.total}`:view.name; button.setAttribute('aria-label',`切换到${button.title}`); button.addEventListener('click',() => setPage(index)); dots.append(button); });
   }
   function setPage(index, animate = true) {
     currentPage = Math.max(0,Math.min(viewPages.length-1,index));closeAppContext();
@@ -504,8 +532,9 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     finishFolderResize(end);
   }
   function createFolder(ids=[],page=viewPages[currentPage].pageId,position=null) {
+    if(ids.length<2){openEditor('folder',null,ids);return null;}
     const folder={id:crypto.randomUUID(),name:suggestGroups(ids.map(appById))[0]?.name||'文件夹',page,appIds:[...ids],sizes:{}};
-    ids.forEach(id=>{removeFromFolders(id);appById(id).page=page;});state.folders.push(folder);
+    ids.forEach(id=>{unpinApp(id,page);removeFromFolders(id);appById(id).page=page;});state.folders.push(folder);
     if(position)state.layout[layoutMode()][folder.id]={page,...position,priority:Date.now()};
     refreshDesktop();openFolder(folder.id);return folder;
   }
@@ -747,10 +776,12 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     suppressClickUntil=Date.now()+450;
     const target=drag.previewTarget;
     const sameSpot=target?.action==='desktop'&&!drag.sourceDock&&!drag.sourceFolder&&target.pageId===drag.sourcePage&&target.x===drag.sourcePos?.x&&target.y===drag.sourcePos?.y&&!target.swap;
-    const settle=()=>{clearDragPreview(drag);drag.ghost?.remove();drag.node.classList.remove('is-dragging');$('#desktopShell').classList.remove('drag-active');document.body.classList.remove('drag-active');dropSettling=false;};
+    const settle=()=>{clearDragPreview(drag);discardDraftPage(drag);drag.ghost?.remove();drag.node.classList.remove('is-dragging');$('#desktopShell').classList.remove('drag-active');document.body.classList.remove('drag-active');dropSettling=false;};
     if(canceled||!target||sameSpot){settle();return;}
     dropSettling=true;
     const mode=layoutMode(),item=itemById(drag.type,drag.id);let createdFolder=null,message='位置已保存';
+    if(drag.draftPage&&target.pageId===drag.draftPage.id){state.pages.push(drag.draftPage);drag.draftPage=null;message='已移入新桌面';}
+    else discardDraftPage(drag);
     freezeLayout(mode);
     const priority=Date.now();
     if(target.action==='dock'){
@@ -912,7 +943,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     const looksLikeDomain=/^(?:[\w-]+\.)+[a-z]{2,}(?:\/\S*)?$/i.test(query);
     window.open(looksLikeDomain&&url?url:engines.find(e=>e.id===activeEngine).url+encodeURIComponent(query),'_blank','noopener,noreferrer');searchClose();
   }
-  function organizationSnapshot() {return clone({apps:state.apps,folders:state.folders,layout:state.layout,dock:state.dock,history:state.history,favoriteIds:state.favoriteIds});}
+  function organizationSnapshot() {return clone({pages:state.pages,apps:state.apps,folders:state.folders,layout:state.layout,dock:state.dock,history:state.history,favoriteIds:state.favoriteIds});}
   function animateDesktopMutation(action) {
     const old=new Map([...document.querySelectorAll('.desktop-canvas>[data-id]')].map(node=>[node.dataset.id,node.getBoundingClientRect()]));
     action();refreshDesktop();
@@ -946,10 +977,11 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
   function closeOrganizer() {organizerRequest?.abort();organizerRequest=null;organizerBusy=false;closeSurface('organizer');}
   function organizerApps() {
     const query=$('#organizerFilter').value.trim().toLocaleLowerCase(),scope=$('#organizerScope').value;
-    return state.apps.filter(app=>!app.system&&(scope!=='current'||app.page===viewPages[currentPage].pageId)&&(scope!=='folder'||folderById(organizerFolderId)?.appIds.includes(app.id))&&($('#organizerExisting').checked||scope==='folder'||!folderOfApp(app.id))&&`${app.name} ${app.url}`.toLocaleLowerCase().includes(query));
+    return state.apps.filter(app=>!app.system&&(organizerMode!=='ai'||!state.dock.includes(app.id))&&(scope!=='current'||app.page===viewPages[currentPage].pageId)&&(scope!=='folder'||folderById(organizerFolderId)?.appIds.includes(app.id))&&($('#organizerExisting').checked||scope==='folder'||!folderOfApp(app.id))&&`${app.name} ${app.url}`.toLocaleLowerCase().includes(query));
   }
   function organizerButton(label,handler,className='chip-button') {const button=el('button',className,label);button.type='button';button.addEventListener('click',handler);return button;}
   function renderOrganizer() {
+    if(organizerMode==='ai')for(const id of selectedApps)if(state.dock.includes(id))selectedApps.delete(id);
     $('#organizerBulkTab').classList.toggle('active',organizerMode==='bulk');$('#organizerAITab').classList.toggle('active',organizerMode==='ai');
     $('#organizerExisting').closest('label').hidden=organizerMode!=='ai'||$('#organizerScope').value==='folder';
     $('#organizerFilter').disabled=organizerBusy;$('#organizerScope').disabled=organizerBusy;$('#organizerExisting').disabled=organizerBusy;
@@ -961,7 +993,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     const grid=el('div','organizer-app-grid');apps.forEach(app=>{
       const label=el('label',`organizer-app${selectedApps.has(app.id)?' selected':''}`),check=el('input');check.type='checkbox';check.checked=selectedApps.has(app.id);check.disabled=organizerBusy;check.setAttribute('aria-label',`选择 ${app.name}`);
       check.addEventListener('change',()=>{if(check.checked)selectedApps.add(app.id);else selectedApps.delete(app.id);label.classList.toggle('selected',check.checked);renderOrganizerFooter();});
-      const copy=el('span','organizer-app-copy');copy.append(el('strong','',app.name),el('small','',folderOfApp(app.id)?.name||state.pages.find(page=>page.id===app.page)?.name));label.append(check,appIcon(app,true),copy);grid.append(label);
+      const copy=el('span','organizer-app-copy');copy.append(el('strong','',app.name),el('small','',state.dock.includes(app.id)?'Dock':folderOfApp(app.id)?.name||state.pages.find(page=>page.id===app.page)?.name));label.append(check,appIcon(app,true),copy);grid.append(label);
     });content.append(grid);if(!apps.length)content.append(el('p','organizer-empty','这里没有符合条件的 App，试试其他范围。'));renderOrganizerFooter();
   }
   function renderOrganizerFooter() {
@@ -981,6 +1013,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
   function applyBulkOrganization() {
     const apps=[...selectedApps].map(appById).filter(app=>app&&!app.system),ids=apps.map(app=>app.id),draft={...bulkDraft};if(!ids.length)return;
     if(draft.action==='new'&&!draft.name.trim())return toast('请输入文件夹名称');
+    if(draft.action==='new'&&ids.length<2)return toast('至少选择两个 App 才能创建文件夹');
     if(draft.action==='dock-add'&&new Set([...state.dock,...ids]).size>12)return toast('Dock 最多 12 个 App，请减少选择');
     if(draft.action==='delete'&&!confirm(`删除选中的 ${ids.length} 个快捷方式？可撤销本次整理。`))return;
     applyOrganization(()=>{
@@ -988,15 +1021,15 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
       if(['new','folder','desktop'].includes(draft.action)){
         const target=draft.action==='new'?{id:crypto.randomUUID(),name:draft.name.trim().slice(0,32),page:draft.page,appIds:[],sizes:{}}:draft.action==='folder'?folderById(draft.folder):null;
         if(draft.action==='new')state.folders.push(target);
-        apps.forEach(app=>{removeFromFolders(app.id);clearAppLayout(app.id);app.page=target?target.page:draft.page;if(target)target.appIds.push(app.id);});pruneEmptiedFolders(previous);
+        apps.forEach(app=>{unpinApp(app.id,target?target.page:draft.page);removeFromFolders(app.id);clearAppLayout(app.id);app.page=target?target.page:draft.page;if(target)target.appIds.push(app.id);});pruneEmptiedFolders(previous);
       }
       if(draft.action==='dock-add')state.dock=[...new Set([...state.dock,...ids])];
-      if(draft.action==='dock-remove')state.dock=state.dock.filter(id=>!ids.includes(id));
+      if(draft.action==='dock-remove')ids.forEach(id=>unpinApp(id,draft.page));
       if(draft.action==='delete'){state.apps=state.apps.filter(app=>!ids.includes(app.id));state.dock=state.dock.filter(id=>!ids.includes(id));state.history=state.history.filter(id=>!ids.includes(id));state.favoriteIds=state.favoriteIds.filter(id=>!ids.includes(id));ids.forEach(id=>{removeFromFolders(id);clearAppLayout(id);});pruneEmptiedFolders(previous);}
     },`已整理 ${ids.length} 个 App`);
   }
   async function generateOrganization() {
-    const apps=(selectedApps.size?[...selectedApps].map(appById):organizerApps()).filter(app=>app&&!app.system);if(apps.length<2)return toast('至少选择两个 App');
+    const apps=(selectedApps.size?[...selectedApps].map(appById):organizerApps()).filter(app=>app&&!app.system&&!state.dock.includes(app.id));if(apps.length<2)return toast('至少选择两个桌面 App');
     organizerRequest?.abort();const controller=new AbortController();organizerRequest=controller;organizerBusy=true;renderOrganizer();const timer=setTimeout(()=>controller.abort(),30000);
     let groups,source='本地智能整理 · 未连接 AI 服务';
     try{
@@ -1091,8 +1124,8 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
   function renderDockSettings(root) {
     settingsHeader(root,'Dock 栏','最多放 12 个最常使用的 App；箭头可调整位置');
     const list=el('div','settings-list');state.dock.forEach((id,index)=>{const app=appById(id);if(!app)return;const row=el('div','settings-row');row.append(appIcon(app,true));const meta=el('div','row-meta');meta.append(el('strong','',app.name),el('small','',`Dock 位置 ${index+1}`));row.append(meta);
-      const actions=el('div','row-actions');[['↑',-1],['↓',1]].forEach(([label,direction])=>{const button=el('button','',label);button.type='button';button.addEventListener('click',()=>{const next=index+direction;if(next<0||next>=state.dock.length)return;[state.dock[index],state.dock[next]]=[state.dock[next],state.dock[index]];save();renderDock();renderSettings();});actions.append(button);});const remove=el('button','','移除');remove.type='button';remove.addEventListener('click',()=>{state.dock=state.dock.filter(x=>x!==id);save();renderDock();renderSettings();});actions.append(remove);row.append(actions);list.append(row);});root.append(list);
-    root.append(el('p','section-eyebrow','添加到 Dock'));const choices=el('div','quick-links');choices.style.marginTop='12px';state.apps.filter(app=>!state.dock.includes(app.id)).forEach(app=>{const button=el('button','chip-button',`+ ${app.name}`);button.type='button';button.addEventListener('click',()=>{if(state.dock.length>=12)return toast('Dock 最多放 12 个 App');state.dock.push(app.id);save();renderDock();renderSettings();});choices.append(button);});root.append(choices);
+      const actions=el('div','row-actions');[['↑',-1],['↓',1]].forEach(([label,direction])=>{const button=el('button','',label);button.type='button';button.addEventListener('click',()=>{const next=index+direction;if(next<0||next>=state.dock.length)return;[state.dock[index],state.dock[next]]=[state.dock[next],state.dock[index]];save();renderDock();renderSettings();});actions.append(button);});const remove=el('button','','移除');remove.type='button';remove.addEventListener('click',()=>{unpinApp(id);refreshDesktop();});actions.append(remove);row.append(actions);list.append(row);});root.append(list);
+    root.append(el('p','section-eyebrow','添加到 Dock'));const choices=el('div','quick-links');choices.style.marginTop='12px';state.apps.filter(app=>!state.dock.includes(app.id)).forEach(app=>{const button=el('button','chip-button',`+ ${app.name}`);button.type='button';button.addEventListener('click',()=>{if(state.dock.length>=12)return toast('Dock 最多放 12 个 App');state.dock.push(app.id);refreshDesktop();});choices.append(button);});root.append(choices);
   }
   function renderAppearanceSettings(root) {
     settingsHeader(root,'桌面外观','选一张喜欢的壁纸，让这里更像你的空间');
@@ -1117,7 +1150,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
   function importLegacy(data) {
     if(Array.isArray(data.apps))return data;
     if(!Array.isArray(data.shortcuts))throw Error('unknown format');
-    const base=clone(defaults);base.apps=data.shortcuts.filter(item=>validUrl(item.url)).map((item,index)=>({id:String(item.id||crypto.randomUUID()),name:String(item.name||'快捷方式'),url:validUrl(item.url),icon:String(item.icon||item.name?.slice(0,2)||'✦'),color:/^#[\da-f]{6}$/i.test(item.color)?item.color:'#6c9ca4',page:pageIds[index%4]}));
+    const base=clone(defaults);base.apps=data.shortcuts.filter(item=>validUrl(item.url)).map((item,index)=>({id:String(item.id||crypto.randomUUID()),name:String(item.name||'快捷方式'),url:validUrl(item.url),icon:String(item.icon||item.name?.slice(0,2)||'✦'),color:/^#[\da-f]{6}$/i.test(item.color)?item.color:'#6c9ca4',page:defaultPageIds[index%defaultPageIds.length]}));
     base.widgets=[...defaults.widgets,...(Array.isArray(data.widgets)?data.widgets:[]).map(item=>({id:String(item.id||crypto.randomUUID()),type:item.type==='link'?'link':'note',page:'personal',size:'medium',title:String(item.title||'旧版便签'),content:String(item.content||'')}))];
     base.apps.forEach(app=>app.iconMode='custom');base.dock=base.apps.slice(0,8).map(app=>app.id);return base;
   }
@@ -1128,7 +1161,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     else{input=el('input');input.type=type;input.value=value??'';}
     wrap.append(input);return {wrap,input};
   }
-  function openEditor(type,id=null) {
+  function openEditor(type,id=null,memberIds=[]) {
     editorContext={type,id};const item=id?itemById(type,id):null;
     $('#editorTitle').textContent=type==='search'?'编辑搜索':`${id?'编辑':'添加'} ${type==='app'?'App':type==='folder'?'文件夹':'Widget'}`;$('#editorDelete').hidden=!id||!!item?.system;$('#editorDelete').textContent=type==='folder'?'解散文件夹':'删除';
     const root=$('#editorFields');root.replaceChildren();const fields={};
@@ -1145,7 +1178,7 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
       [['width','宽度',size.w,gridColumns(layoutMode())],['height','高度',size.h,rowsPerPage]].forEach(([key,label,value,max])=>{const entry=field(label,value,'number');entry.input.name=key;entry.input.min='1';entry.input.max=String(max);fields[key]=entry.input;advanced.append(entry.wrap);});
       root.append(el('p','settings-note','选择大小，也可以保存后直接拖边角调整。'));renderFolderSizePicker(root,item||{sizes:{[layoutMode()]:size}},(w,h)=>{fields.width.value=w;fields.height.value=h;});root.append(advanced);
       const members=el('div','folder-member-list');fields.memberChecks=[];
-      state.apps.filter(app=>!app.system).forEach(app=>{const label=el('label','folder-member');const check=el('input');check.type='checkbox';check.value=app.id;check.checked=item?.appIds.includes(app.id)||false;fields.memberChecks.push(check);label.append(check,appIcon(app,true),el('span','',app.name));members.append(label);});root.append(el('p','settings-note','选择要组合的 App。已在其他文件夹中的 App 会移入这里。'),members);
+      state.apps.filter(app=>!app.system).forEach(app=>{const label=el('label','folder-member');const check=el('input');check.type='checkbox';check.value=app.id;check.checked=item?.appIds.includes(app.id)||memberIds.includes(app.id);fields.memberChecks.push(check);label.append(check,appIcon(app,true),el('span','',app.name));members.append(label);});root.append(el('p','settings-note','选择至少两个 App。已有文件夹或 Dock 中的 App 会移入这里；只剩一个 App 的文件夹会自动解散。'),members);
     }else if(type==='search'){
       add('name','搜索框文字',state.searchLabel);add('engine','默认搜索引擎',state.searchEngine,'select',engines.map(engine=>[engine.id,engine.name]));
     }else{
@@ -1161,14 +1194,15 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
       const existing=appById(id),url=existing?.system?'':validUrl(fields.url.value.trim());if(!existing?.system&&!url)return toast('请输入以 http 或 https 开头的网址');
       const name=fields.name.value.trim();if(!name)return toast('请输入 App 名称');
       const app={id:id||crypto.randomUUID(),system:existing?.system,name:name.slice(0,32),url,icon:fields.icon.value.trim().slice(0,180)||'✦',iconMode:fields.iconMode.value,color:fields.color.value,page:fields.page.value};
-      if(existing&&existing.page!==app.page)removeFromFolders(id);
+      if(existing&&existing.page!==app.page){unpinApp(id,app.page);removeFromFolders(id);}
       const index=state.apps.findIndex(item=>item.id===id);if(index>=0)state.apps[index]=app;else state.apps.push(app);
     }else if(type==='folder'){
       const name=fields.name.value.trim();if(!name)return toast('请输入文件夹名称');
       const w=Math.round(Number(fields.width.value)),h=Math.round(Number(fields.height.value));if(w<1||w>gridColumns(layoutMode())||h<1||h>rowsPerPage||!Number.isFinite(w+h))return toast('请输入范围内的文件夹大小');
+      if(!id&&fields.memberChecks.filter(check=>check.checked).length<2)return toast('至少选择两个 App 才能创建文件夹');
       const folder=folderById(id)||{id:crypto.randomUUID(),sizes:{},appIds:[]};freezeLayout(layoutMode());
       folder.name=name.slice(0,32);folder.page=fields.page.value;folder.appIds=fields.memberChecks.filter(check=>check.checked).map(check=>check.value);folder.sizes[layoutMode()]={w,h};
-      folder.appIds.forEach(appId=>{state.folders.filter(other=>other.id!==folder.id).forEach(other=>other.appIds=other.appIds.filter(value=>value!==appId));appById(appId).page=folder.page;});if(!id)state.folders.push(folder);
+      folder.appIds.forEach(appId=>{unpinApp(appId,folder.page);state.folders.filter(other=>other.id!==folder.id).forEach(other=>other.appIds=other.appIds.filter(value=>value!==appId));appById(appId).page=folder.page;});if(!id)state.folders.push(folder);
       state.layout[layoutMode()][folder.id]={...(state.layout[layoutMode()][folder.id]||{}),page:folder.page,priority:Date.now()};
     }else if(type==='search'){
       state.searchLabel=fields.name.value.trim().slice(0,80)||defaults.searchLabel;state.searchEngine=fields.engine.value;updateSearchPreferences();
@@ -1274,12 +1308,14 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
     event.preventDefault(); drag.lastX=event.clientX;drag.lastY=event.clientY;
     drag.ghost.style.left=`${event.clientX-drag.offsetX}px`;drag.ghost.style.top=`${event.clientY-drag.offsetY}px`;
     updateDragPreview(drag,event);
-    if(drag.previewTarget?.action!=='desktop'&&drag.previewTarget?.action!=='folder-create'){clearTimeout(drag.edgeTimer);drag.edgeDestination=null;return;}
-    const edge=event.clientX<38?-1:event.clientX>innerWidth-38?1:0;
+    const viewportRect=$('#desktopViewport').getBoundingClientRect();
+    if(!insideRect(event,viewportRect)||drag.previewTarget?.action==='folder-order'){clearTimeout(drag.edgeTimer);drag.edgeDestination=null;return;}
+    const edge=event.clientX<viewportRect.left+38?-1:event.clientX>viewportRect.right-38?1:0;
     const destination=currentPage+edge;
-    if(edge && destination>=0 && destination<viewPages.length){
+    const canAdd=edge===1&&destination===viewPages.length&&!viewPages[currentPage].temporary;
+    if(edge && destination>=0 && (destination<viewPages.length||canAdd)){
       if(drag.edgeDestination!==destination){clearTimeout(drag.edgeTimer);drag.edgeDestination=destination;
-        drag.edgeTimer=setTimeout(()=>{if(dragState===drag){clearDragPreview(drag);setPage(destination);drag.edgeDestination=null;
+        drag.edgeTimer=setTimeout(()=>{if(dragState===drag){clearDragPreview(drag);resetGroupCandidate(drag);setPage(canAdd?appendDraftPage(drag):destination);drag.edgeDestination=null;
           setTimeout(()=>{if(dragState===drag)updateDragPreview(drag,{clientX:drag.lastX,clientY:drag.lastY});},470);}},560);}
     }else{clearTimeout(drag.edgeTimer);drag.edgeDestination=null;}
   },{passive:false});
@@ -1303,5 +1339,5 @@ import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
   setInterval(()=>{if(state.wallpaper==='bing')loadBingWallpaper();},3600000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.wallpaper==='bing')loadBingWallpaper();});
 
-  updateSearchPreferences();setWallpaper();renderPages();renderDock();loadWeather();updateClock();setInterval(updateClock,30000);
+  updateSearchPreferences();setWallpaper();renderPages();renderDock();save();loadWeather();updateClock();setInterval(updateClock,30000);
 })();
