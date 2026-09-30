@@ -17,6 +17,9 @@
       <header class="topbar">
         <div class="top-context"><span id="topPageName">首页</span><span class="top-context-separator">·</span><span id="topDate"></span></div>
         <div class="top-actions">
+          <button class="top-tool" id="undoOrganize" type="button" hidden>撤销整理</button>
+          <button class="top-tool" id="organizeButton" type="button" title="AI 自动整理" aria-label="AI 自动整理">✧ <span>自动整理</span></button>
+          <button class="round-action" id="batchButton" type="button" title="批量整理 App" aria-label="批量整理 App">☑</button>
           <button class="round-action" id="editModeButton" type="button" title="整理桌面" aria-label="整理桌面">✦</button>
         </div>
       </header>
@@ -78,9 +81,20 @@
     <dialog class="folder-dialog morph-surface" id="folderDialog" aria-label="文件夹">
       <div class="folder-frame">
         <header class="folder-head"><div><p class="section-eyebrow">APP COLLECTION</p><input id="folderName" maxlength="32" aria-label="文件夹名称" /></div><button class="icon-button" id="folderClose" type="button" aria-label="关闭文件夹">×</button></header>
-        <div class="folder-hint"><span>长按或拖动整理 · 拖出文件夹放回桌面</span><button class="chip-button" id="folderManage" type="button">编辑</button></div>
+        <div class="folder-hint"><span>拖动排序 · 拖出放回桌面</span><div><button class="chip-button" id="folderBatch" type="button">多选</button><button class="chip-button" id="folderManage" type="button">添加 / 编辑</button></div></div>
         <div class="folder-app-grid" id="folderGrid"></div>
         <nav class="folder-pagination" id="folderPagination" aria-label="文件夹分页"></nav>
+      </div>
+    </dialog>
+
+    <div class="window-overlay" id="organizerOverlay" aria-hidden="true"><div class="window-backdrop" id="organizerBackdrop"></div></div>
+    <dialog class="organizer-dialog morph-surface" id="organizerDialog" aria-label="整理 App">
+      <div class="organizer-frame">
+        <header class="settings-head"><div><p class="section-eyebrow">MAKE ROOM FOR WHAT YOU LOVE</p><h2>整理你的桌面</h2></div><button class="icon-button" id="organizerClose" type="button" aria-label="关闭整理">×</button></header>
+        <nav class="organizer-tabs" aria-label="整理方式"><button type="button" id="organizerBulkTab">批量整理</button><button type="button" id="organizerAITab">✧ AI 自动整理</button></nav>
+        <div class="organizer-controls"><label>范围 <select id="organizerScope" aria-label="整理范围"></select></label><input id="organizerFilter" type="search" placeholder="查找 App…" aria-label="筛选 App" /><label class="organizer-existing"><input id="organizerExisting" type="checkbox" />包含已有文件夹</label></div>
+        <div class="organizer-content" id="organizerContent"></div>
+        <footer class="organizer-footer" id="organizerFooter"></footer>
       </div>
     </dialog>
 
@@ -94,6 +108,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./config.js"></script>
-    <script src="./script.js"></script>
+    <script type="module" src="./script.js"></script>
   </body>
 </html>

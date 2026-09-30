@@ -4,12 +4,14 @@
 
 ## 功能
 
-- 四组桌面：鼠标拖动、触摸滑动、滚轮和方向键切换，自动吸附。每屏固定且不需要上下滚动；内容过多时自动续到下一张横向桌面。
+- 自由桌面：取消预设网站分类和按类型命名的页面；鼠标拖动、触摸滑动、滚轮和方向键切换，自动吸附。每屏固定且不需要上下滚动；内容过多时自动续到下一张横向桌面。
 - 每组默认至少 14 个 App 图标，一键打开网站；固定 Dock 支持拖入、拖出和排序，最多 12 个 App。
 - 搜索框从 Dock 上方的胶囊入口连续展开为悬浮面板，关闭时收回原处，中途可反向展开；实时匹配 App、网址和搜索历史，支持 Google、Bing、百度、GitHub。
 - 实时时钟、月历、可勾选和编辑的每日 Todo、每日一句、实时天气、最近访问、收藏、学习进度、继续观看和原创轻音乐播放器。
 - App、Widget 和文件夹在同一张网格内拖动：落点和同尺寸交换会提前预览，松手后才保存；拖到左右边缘稍作停留可移到相邻页面。触屏长按拖动，点右上角 ✦ 进入整理模式。
-- 把一个 App 拖到另一个 App 上方停留片刻可创建文件夹，也可拖入已有文件夹、从打开的文件夹拖出。支持内部排序、直接改名、选择成员和解散；整理模式拖动右下角可按网格调整文件夹大小，并预览受影响图标的位置。小文件夹显示预览，较大的文件夹可直接点击内部 App。
+- 把一个 App 拖到另一个 App 上方停留片刻可创建文件夹，也可拖入已有文件夹、从打开的文件夹拖出。支持内部排序、直接改名、选择成员和解散；右键一键选择小、大、宽、超大尺寸，也可直接拖右下角调整，预览受影响图标的位置。触屏长按文件夹显示菜单和调整边缘。大文件夹按实际宽高显示完整 App 格子，可一键打开；多余 App 通过最后一个叠放入口访问，避免半排图标被裁掉。
+- 批量整理：顶部 ☑、App 右键菜单、文件夹中的「多选」和设置均可进入。支持跨桌面多选、全选筛选结果、合并新文件夹、移入已有文件夹、移到桌面、加入或移出 Dock、批量删除；操作后可撤销，已有其他桌面修改时不会强行覆盖。
+- AI 自动整理：顶部 ✧ 打开，选择范围后生成可编辑的文件夹预览，再决定是否应用。可改名、移除成员、取消某组、修改目标桌面；只有确定后才保存。已在文件夹中的 App 默认不参与，相同名称和目标桌面的文件夹会合并。
 - App 默认根据网址自动获取网站图标；图标不可用时显示备用文字或 emoji，也可在编辑快捷方式时切换为手动图标。
 - 右键编辑 App、Widget、文件夹、搜索入口和 Dock，桌面空白处提供添加和整理操作；App 还支持复制链接、移动页面、加入文件夹和删除。
 - 桌面「设置」App 从图标连续展开，关闭时收回图标；可管理 App、文件夹、Widget、Dock、壁纸、天气位置和备份。
@@ -25,12 +27,13 @@
 npm run dev
 ```
 
-访问 `http://localhost:4173`。也可以直接打开 `index.html`；此时天气等在线功能仍需要网络。
+访问 `http://localhost:4173`。页面使用原生 ES modules，请通过本地服务器或部署地址访问。天气、壁纸和云端 AI 等在线功能需要网络；本地预览未连接 Workers AI 时，自动整理会使用本地规则并显示来源。
 
 ## 构建与部署
 
 ```bash
 npm run check
+npm test
 npm run build
 ```
 
@@ -71,18 +74,26 @@ npm run dev:worker
 2. 部署 Worker 后，进入 Workers & Pages → `weboss` → Bindings（绑定）→ Add binding（添加绑定）。
 3. 选择 D1 database，变量名称填写 **`DB`**，从列表中选择新数据库并保存。
 
-`wrangler.jsonc` 使用 Wrangler 的 `unsafe.metadata.keep_bindings` 上传元数据配置，保留控制台已有的 D1 绑定，以及 Wrangler 默认保留的密钥类型。因此后续通过本仓库的 `npm run deploy` 部署时，不会因配置中没有数据库 ID 而移除现有 D1 绑定。首次部署尚未绑定数据库时也可以正常发布页面；该配置不会自动新建数据库。
+`wrangler.jsonc` 使用 Wrangler 的 `unsafe.metadata.keep_bindings` 上传元数据配置，保留控制台已有的 D1 / Workers AI 绑定，以及 Wrangler 默认保留的密钥类型。因此后续通过本仓库的 `npm run deploy` 部署时，不会因配置中没有数据库 ID 而移除现有 D1 绑定。首次部署尚未绑定数据库时也可以正常发布页面；该配置不会自动新建数据库。
 
 后续 Worker 接口使用 `env.DB` 访问所绑定的数据库。**当前版本仍使用浏览器 `localStorage`，还没有 D1 读写、表结构、身份验证和云端同步接口；绑定数据库本身不会启用云端保存。**
 
 部署配置参考 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/) 和 [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/)；控制台绑定参考 [D1 绑定文档](https://developers.cloudflare.com/d1/best-practices/remote-development/)，保留绑定的上传元数据参考 [Worker 版本上传 API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/create/)。
+
+### 启用云端 AI 整理
+
+部署最新代码后，在 Cloudflare → Workers & Pages → `weboss` → 绑定 → 添加绑定中，选择 **Workers AI**，变量名称填 **`AI`** 并保存。无需把账号 ID 或 API Key 写进前端或仓库；D1 绑定与 AI 整理独立。
+
+「生成整理预览」会调用同源 `POST /api/organize`，使用 Workers AI 的 `@cf/meta/llama-3.3-70b-instruct-fp8-fast`。只发送所选 App 的名称和域名，不发送 URL 参数、历史记录、Todo 或壁纸。Worker 限制请求大小及 App 数量（每次 2～120 个），校验结果中的 App ID、去重，并通过 `AI_LIMITER` 限制每个 Cloudflare 服务位置每分钟 6 次推理请求；这不是全局用量上限。Workers AI 的实际用量和计费以 Cloudflare 控制台为准。
+
+未绑定 AI、网络超时、服务失败或超过 120 个 App 时，界面自动改用本地名称 / 域名规则，并明确显示「本地智能整理」。不认识的站点和单个 App 保持原位；所有整理均先预览，再由用户应用。参考 [Workers AI 绑定](https://developers.cloudflare.com/workers-ai/configuration/bindings/) 和 [JSON Mode](https://developers.cloudflare.com/workers-ai/features/json-mode/)。
 
 ## 自定义
 
 打开桌面的「设置」App 或右键点击元素即可编辑。首次加载的默认数据位于 [`config.js`](./config.js)，采用 JSON 兼容的对象结构：
 
 ```js
-{ id: "github", name: "GitHub", url: "https://github.com", icon: "GH", iconMode: "auto", color: "#252b3a", page: "home", category: "开发" }
+{ id: "github", name: "GitHub", url: "https://github.com", icon: "GH", iconMode: "auto", color: "#252b3a", page: "home" }
 ```
 
 `iconMode: "auto"` 根据 `url` 获取网站图标，`icon` 是加载失败时的备用标识；`iconMode: "custom"` 使用手动图标。手动图标可用文字、emoji，或以 `https://` 开头的图片 URL。自定义壁纸和布局保存在当前浏览器的 `localStorage` 中；跨设备迁移请在设置 → 数据中导出和导入 JSON。
