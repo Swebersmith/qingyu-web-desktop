@@ -17,6 +17,7 @@
       <header class="topbar">
         <div class="top-context"><span id="topPageName">首页</span><span class="top-context-separator">·</span><span id="topDate"></span></div>
         <div class="top-actions">
+          <button class="round-action cloud-sync-button" id="cloudSyncButton" type="button" title="云同步" aria-label="云同步" data-phase="off">☁</button>
           <button class="top-tool" id="undoOrganize" type="button" hidden>撤销整理</button>
           <button class="top-tool" id="organizeButton" type="button" title="AI 自动整理" aria-label="AI 自动整理">✧ <span>自动整理</span></button>
           <button class="round-action" id="batchButton" type="button" title="批量整理 App" aria-label="批量整理 App">☑</button>
@@ -71,6 +72,7 @@
           <button type="button" data-tab="todos">今日计划</button>
           <button type="button" data-tab="dock">Dock</button>
           <button type="button" data-tab="appearance">外观</button>
+          <button type="button" data-tab="sync">云同步</button>
           <button type="button" data-tab="data">数据</button>
         </nav>
         <div class="settings-content" id="settingsContent"></div>

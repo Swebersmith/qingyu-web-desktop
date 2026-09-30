@@ -17,6 +17,7 @@
 - 桌面「设置」App 从图标连续展开，关闭时收回图标；可管理 App、文件夹、Widget、Dock、壁纸、天气位置和备份。
 - 支持上传本地壁纸、填写图片 URL，以及 Bing 每日一图；每日壁纸加载成功后缓存，网络失败时保留上一张。
 - 浏览器自动保存配置，支持 JSON 备份和导入，并兼容原项目的 `shortcuts` / `widgets` 导出结构。
+- 跨设备云同步：设置中的「云同步」或右上角 ☁ 进入。同步 App、文件夹、小组件、Dock、Todo、壁纸和各尺寸布局；离线继续保存，联网后自动同步。不同内容的并发修改自动合并，同一处的冲突由用户选择版本；接入云桌面及应用远程更新前保留最近三份本机恢复备份。
 - 桌面、平板与手机分别保存布局；桌面内容与固定搜索、Dock 分区显示，避免遮挡；所有面板隐藏滚动条，仍可滚轮和触摸滚动；尊重系统减少动态效果的偏好。
 
 ## 本地运行
@@ -76,7 +77,24 @@ npm run dev:worker
 
 `wrangler.jsonc` 使用 Wrangler 的 `unsafe.metadata.keep_bindings` 上传元数据配置，保留控制台已有的 D1 / Workers AI 绑定，以及 Wrangler 默认保留的密钥类型。因此后续通过本仓库的 `npm run deploy` 部署时，不会因配置中没有数据库 ID 而移除现有 D1 绑定。首次部署尚未绑定数据库时也可以正常发布页面；该配置不会自动新建数据库。
 
-后续 Worker 接口使用 `env.DB` 访问所绑定的数据库。**当前版本仍使用浏览器 `localStorage`，还没有 D1 读写、表结构、身份验证和云端同步接口；绑定数据库本身不会启用云端保存。**
+Worker 的云同步接口通过 `env.DB` 读写数据库。首次同步请求会自动建立 `weboss_desktops` 表，不需要手动执行 SQL；[`schema.sql`](./schema.sql) 提供相同表结构以便检查。现有数据库中的其他表不会受影响。数据库 ID 仍只在控制台绑定，不写入仓库。
+
+### 启用内容和界面同步
+
+1. 部署最新代码，确保 D1 已通过变量 **`DB`** 绑定到 Worker。
+2. 在已有桌面的设备上打开右上角 ☁ 或「设置 → 云同步」，选择 **创建云桌面**。
+3. 点击 **复制密钥**。在其他设备打开同一 Workers 网站，在「云同步」中输入密钥，选择 **连接并使用云桌面**。接入前的本机桌面会自动备份。
+4. 之后编辑内容或拖动位置会自动上传；页面显示时约每 12 秒检查远程更新，恢复网络或切回页面时也会检查。正在拖动、编辑 App 或批量整理时会延后拉取。右上角指示灯及同步面板显示状态，也可点击 **立即同步**。
+
+桌面、平板和手机的 `layout` 各自保存并同步，不强制把 PC 网格缩小到手机。同步范围包含快捷方式、页面、文件夹成员及尺寸、Widget、Todo、历史、Dock、搜索偏好、天气城市和壁纸；当前打开的窗口、搜索输入和播放状态留在各设备。自定义壁纸随配置同步，单份配置最多 1 MB；较大的图片可改用壁纸 URL。
+
+同步密钥由 256 位安全随机数生成，是云桌面的读写凭据。服务器仅保存密钥的 SHA-256 摘要；密钥不出现在 URL、普通桌面 JSON 备份或日志中。拥有相同密钥的设备共享同一桌面；不同密钥的数据隔离。此版本未提供账号登录或端到端加密，桌面内容以 JSON 保存于你绑定的 D1。断开仅移除本机连接，不删除云端或当前本机数据。
+
+云端采用递增版本号及带版本条件的 SQL 更新，防止并发覆盖。客户端使用上次已同步版本进行三方合并：独立改动自动合并，同一字段的不同修改、删除与编辑、矛盾的文件夹归属会暂停写入。冲突面板可下载两个版本、使用云端或保留本机；被替换版本自动备份。同步记录和最近三份恢复备份保存在本机 IndexedDB，密钥单独保存在本机浏览器存储中，清除浏览器数据后需重新输入密钥。
+
+`GET /api/sync/status` 检查绑定状态；`GET /api/sync` 拉取、`PUT /api/sync` 保存均要求 `Authorization: Bearer <同步密钥>`，响应禁止缓存，写入校验配置结构、大小和版本号。`SYNC_LIMITER` 按访问 IP / Cloudflare 服务位置限制每分钟 60 次同步请求；该计数不是全局限额。静态 Pages 或普通静态预览继续支持本地保存，云同步需要 Workers API。
+
+实现依据 [D1 参数化查询](https://developers.cloudflare.com/d1/worker-api/prepared-statements/)、[D1 一致性与 Sessions API](https://developers.cloudflare.com/d1/worker-api/d1-database/)、[D1 限制](https://developers.cloudflare.com/d1/platform/limits/) 和 [Workers Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)。
 
 部署配置参考 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/) 和 [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/)；控制台绑定参考 [D1 绑定文档](https://developers.cloudflare.com/d1/best-practices/remote-development/)，保留绑定的上传元数据参考 [Worker 版本上传 API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/create/)。
 

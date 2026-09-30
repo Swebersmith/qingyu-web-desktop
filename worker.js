@@ -1,4 +1,5 @@
 import {validateGroups} from './organizer.js';
+import {syncAPI} from './sync-api.js';
 
 const json = (body,status=200) => Response.json(body,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 
@@ -52,6 +53,7 @@ export default {
   async fetch(request, env) {
     const path=new URL(request.url).pathname;
     if(path==='/api/organize')return organize(request,env);
+    if(path==='/api/sync'||path==='/api/sync/status')return syncAPI(request,env);
     if(path.startsWith('/api/'))return json({error:'not_found'},404);
     return env.ASSETS.fetch(request);
   }

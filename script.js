@@ -1,5 +1,7 @@
 import {suggestGroups, validateGroups, folderMetrics} from './organizer.js';
 import {normalizePages, reconcileDesktop} from './desktop-model.js';
+import {CloudSync,SYNC_STORAGE_KEY} from './sync-client.js';
+import {generateSyncKey,sameState} from './sync-model.js';
 
 (() => {
   'use strict';
@@ -120,6 +122,7 @@ import {normalizePages, reconcileDesktop} from './desktop-model.js';
   let organizerMode = 'bulk', organizerFolderId = null, organizerPlan = null, organizerBusy = false;
   let organizerRequest = null, organizationUndo = null;
   const selectedApps = new Set();
+  let cloudSync,cloudStatus={phase:'off'},syncDraft='',syncKeyVisible=false,syncBackupId='',syncService='unknown',pendingExternalState=false;
   let bulkDraft = {action:'new',name:'常用 App',page:'home',folder:''};
   const folderResizeObserver = new ResizeObserver(entries => entries.forEach(entry => fitFolderTile(entry.target)));
   const music = { context: null, timer: null, frame: null, playing: false, track: 0, elapsed: 0, lastTick: 0, lastNote: -1 };
@@ -132,6 +135,7 @@ import {normalizePages, reconcileDesktop} from './desktop-model.js';
     if(result.dissolved.includes(sizingFolderId))sizingFolderId=null;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch { toast('浏览器存储空间不足，请导出配置备份'); }
+    pendingExternalState=false;cloudSync?.localChanged();
   }
   function toast(message) {
     const el = $('#toast'); el.textContent = message; el.classList.add('show');
@@ -885,9 +889,9 @@ import {normalizePages, reconcileDesktop} from './desktop-model.js';
       if(!rect||rect.right<0||rect.left>innerWidth)origin=$('.dock-more');
       const owner=origin.closest('[data-id]'),area=owner?.classList.contains('dock-app')?'#dock':'.desktop-canvas';
       context={...nodes,name,origin,originRect:origin.getBoundingClientRect(),originSelector:owner?`${area} [data-id="${CSS.escape(owner.dataset.id)}"]${origin.classList.contains('app-icon')?' .app-icon':''}`:origin.id?`#${origin.id}`:null};surfaces.set(name,context);
-      context.seed=el('div',`surface-seed ${name}-seed`);
+      context.seed=el('div',`surface-seed ${name}-seed`);context.seed.setAttribute('aria-hidden','true');
       if(name==='search')context.seed.append(el('span','search-glyph','⌕'),el('span','',state.searchLabel));
-      else if(name==='settings')context.seed.append(origin.cloneNode(true));
+      else if(name==='settings'){const seed=origin.cloneNode(true);seed.removeAttribute('id');seed.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));context.seed.append(seed);}
       else context.seed.append(el('span','folder-seed-icon','▦'));
       nodes.panel.append(context.seed);if(nodes.panel instanceof HTMLDialogElement)nodes.panel.show();
     }
@@ -1079,6 +1083,7 @@ import {normalizePages, reconcileDesktop} from './desktop-model.js';
     if(settingsTab==='dock')renderDockSettings(root);
     if(settingsTab==='appearance')renderAppearanceSettings(root);
     if(settingsTab==='data')renderDataSettings(root);
+    if(settingsTab==='sync')renderSyncSettings(root);
   }
   function settingsHeader(root,title,subtitle,buttonText,action) {
     const bar=el('div','settings-toolbar');const copy=el('div');copy.append(el('h3','',title),el('p','',subtitle));bar.append(copy);
@@ -1146,6 +1151,80 @@ import {normalizePages, reconcileDesktop} from './desktop-model.js';
     const importLabel=el('label','button-secondary','导入 JSON 备份');importLabel.style.cursor='pointer';const input=el('input');input.type='file';input.accept='.json,application/json';input.addEventListener('change',async()=>{if(!input.files?.[0])return;try{const data=JSON.parse(await input.files[0].text());const imported=importLegacy(data);state=normalize(imported);save();updateSearchPreferences();setWallpaper();renderPages();renderDock();renderSettings();loadWeather();toast('桌面配置已导入');}catch{toast('JSON 格式不正确');}});importLabel.append(input);actions.append(importLabel);root.append(actions);
     const reset=el('button','text-danger','恢复默认桌面');reset.type='button';reset.addEventListener('click',()=>{if(!confirm('确定恢复默认桌面？当前自定义布局会被覆盖。'))return;state=normalize(defaults);save();setWallpaper();renderPages();renderDock();renderSettings();loadWeather();updateSearchPreferences();toast('已恢复默认桌面');});root.append(reset);
     root.append(el('p','settings-note','兼容导入原 browser-start-page-v2 导出的 shortcuts / widgets JSON。网站配置只存于本机浏览器，清除浏览器数据前请先导出备份。'));
+  }
+  function downloadJSON(value,name) {
+    const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'})),link=el('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  function syncBusy(){return !!(dragState||resizeState||dropSettling||$('#editorDialog').open||surfaces.has('organizer')||document.activeElement?.matches('#settingsContent input:not([readonly]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),#settingsContent textarea,#settingsContent select'));}
+  function applySyncedState(raw) {
+    const oldCity=JSON.stringify(state.city);state=normalize(raw);
+    if(state.todoDate!==todayKey){state.todos.forEach(todo=>todo.done=false);state.todoDate=todayKey;}
+    try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch{toast('浏览器存储空间不足，请导出桌面备份');}
+    pendingExternalState=false;organizationUndo=null;$('#undoOrganize').hidden=true;closeAppContext();
+    if(folderId&&!folderById(folderId))closeFolder();updateSearchPreferences();setWallpaper();renderPages();renderDock();
+    if(folderId)renderFolderContents();if(surfaces.has('search'))renderSearch();if($('#settingsDialog').open)renderSettings();if(JSON.stringify(state.city)!==oldCity)loadWeather();
+  }
+  function updateSyncStatus(status) {
+    cloudStatus=status;const captions={off:'云同步',syncing:'正在同步',synced:'已同步',pending:'等待同步',offline:'离线 · 改动已保存',conflict:'同步冲突',error:'同步暂不可用',reconnect:'重新连接云桌面'};
+    const button=$('#cloudSyncButton');button.dataset.phase=status.phase;button.title=captions[status.phase]||'云同步';button.setAttribute('aria-label',`云同步：${button.title}`);
+    if($('#settingsDialog').open&&settingsTab==='sync')renderSettings();
+  }
+  async function checkSyncService() {
+    try{const response=await fetch('/api/sync/status',{cache:'no-store'});syncService=response.ok?(await response.json()).configured?'ready':'missing':'static';}catch{syncService='unknown';}
+    if($('#settingsDialog').open&&settingsTab==='sync')renderSettings();
+  }
+  function syncFieldLabel(path) {
+    if(path.startsWith('layout.'))return '图标或组件位置';if(path.startsWith('apps.'))return 'App 信息或所在桌面';if(path.startsWith('folders.'))return '文件夹信息、成员或排序';
+    if(path.startsWith('widgets.'))return '小组件内容';if(path.startsWith('todos.'))return '今日计划';if(path.startsWith('pages.'))return '桌面页面';if(path.startsWith('dock'))return 'Dock 图标或排序';
+    return ({wallpaper:'壁纸主题',customWallpaper:'自定义壁纸',searchEngine:'搜索引擎',searchLabel:'搜索框',city:'天气城市'})[path]||'桌面内容';
+  }
+  function syncDifference(path,data) {
+    const parts=path.split('.');let value=data;
+    for(const part of parts){if(Array.isArray(value))value=value.find(item=>item?.id===part);else value=value?.[part];}
+    if(value===undefined)return '已移除';
+    if(path.endsWith('.page'))return data.pages.find(page=>page.id===value)?.name||String(value);
+    if(typeof value==='boolean')return value?'已完成':'未完成';
+    if(Array.isArray(value))return value.map(id=>data.apps.find(app=>app.id===id)?.name||String(id)).join('、').slice(0,90)||'无';
+    if(value&&typeof value==='object')return String(value.name||value.title||value.text||'已修改位置或内容');
+    const text=String(value);return text.startsWith('data:image/')?'自定义图片':text.slice(0,90);
+  }
+  function renderSyncSettings(root) {
+    settingsHeader(root,'云同步','让每台设备，都打开同一个自己的桌面');
+    const phase=cloudStatus.phase,working=phase==='syncing',connected=!!cloudSync?.key;
+    const captions={off:'仅保存在此设备',syncing:'正在同步…',synced:'内容和布局已同步',pending:'本机改动待同步',offline:'离线，改动已保存在本机',conflict:'有修改需要你选择',error:'同步暂不可用',reconnect:'需要重新连接'};
+    const status=el('div',`sync-status-card ${phase}`);status.setAttribute('role','status');status.append(el('span','sync-status-icon','☁'));
+    const copy=el('div');copy.append(el('strong','',captions[phase]||'云同步'),el('p','',cloudStatus.detail||(phase==='reconnect'?'本机同步记录已丢失；重新连接前会备份当前桌面。':connected?`云端版本 ${cloudStatus.revision||'—'}${cloudStatus.updatedAt?' · '+new Date(cloudStatus.updatedAt).toLocaleString('zh-CN'):''}`:'同步快捷方式、文件夹、小组件、Dock、Todo、壁纸和布局。')));status.append(copy);root.append(status);
+    root.append(el('p','settings-note','桌面、平板和手机各自的网格布局都会保存。未关闭的搜索、播放器和窗口状态只留在当前设备。'));
+    const action=(label,fn,className='button-secondary')=>{const button=el('button',className,label);button.type='button';button.disabled=working||!cloudSync?.ready;button.addEventListener('click',async()=>{try{await fn();}catch(error){toast(error.message||'暂时无法同步');}});return button;};
+    if(!connected){
+      const setup=el('div','sync-connect-card');setup.append(el('h4','','第一次使用'),el('p','','用当前桌面创建云桌面，再将同步密钥复制到其他设备。'));
+      const create=action('创建云桌面',async()=>{const ok=await cloudSync.connect(generateSyncKey(),true);if(ok){syncDraft='';toast('云桌面已创建，可复制密钥连接其他设备');}},'button-primary');setup.append(create);root.append(setup);
+      const connect=el('div','sync-connect-card');connect.append(el('h4','','连接已有云桌面'),el('p','','输入另一设备的同步密钥。连接后使用云端桌面，当前桌面会自动备份。'));
+      const key=field('同步密钥',syncDraft,'password');key.input.autocomplete='off';key.input.spellcheck=false;key.input.placeholder='wo_…';key.input.maxLength=46;key.input.addEventListener('input',()=>syncDraft=key.input.value.trim());connect.append(key.wrap);
+      const join=action('连接并使用云桌面',async()=>{const ok=await cloudSync.connect(syncDraft.trim());if(ok){syncDraft='';toast('已连接云桌面');}},'button-primary');connect.append(join);root.append(connect);
+      if(['missing','static'].includes(syncService)){create.disabled=join.disabled=true;root.append(el('p','sync-service-note',syncService==='missing'?'尚未绑定数据库：在 Cloudflare 的 Worker 绑定中添加 D1，变量名填写 DB，保存后重新打开此面板。':'当前是静态预览。请在部署的 Cloudflare Workers 地址中启用云同步。'));}
+    }else{
+      const key=field('此云桌面的同步密钥',cloudSync.key,syncKeyVisible?'text':'password');key.input.readOnly=true;key.input.autocomplete='off';key.input.spellcheck=false;root.append(key.wrap);
+      const actions=el('div','sync-actions');actions.append(action('复制密钥',async()=>{try{await navigator.clipboard.writeText(cloudSync.key);toast('密钥已复制');}catch{syncKeyVisible=true;renderSettings();toast('请手动复制同步密钥');}}),action(syncKeyVisible?'隐藏':'显示',()=>{syncKeyVisible=!syncKeyVisible;renderSettings();}));root.append(actions);
+      root.append(el('p','settings-note','在其他设备输入同一密钥即可连接。持有密钥的人可以读取和修改此云桌面；密钥不会写入桌面 JSON 备份。'));
+      const controls=el('div','sync-actions');controls.append(action(phase==='reconnect'?'重新连接并使用云端':'立即同步',()=>phase==='reconnect'?cloudSync.connect(cloudSync.key):cloudSync.run(true),'button-primary'),action('断开此设备',()=>{cloudSync.disconnect();syncKeyVisible=false;toast('已断开，当前桌面保留在本机');}));root.append(controls);
+    }
+    if(cloudStatus.conflict){
+      const conflict=el('div','sync-conflict-card'),remote=cloudStatus.conflict.remote;
+      conflict.append(el('h4','','两台设备修改了同一处'),el('p','','已暂停自动覆盖。选择需要保留的版本，另一版本会自动备份。'));
+      const descriptions=[...new Set(cloudStatus.conflict.fields.map(syncFieldLabel))];conflict.append(el('p','sync-conflict-fields',descriptions.slice(0,4).join(' · ')));
+      const versions=el('div','sync-versions');for(const [label,data] of [['本机',state],['云端',remote.state]]){const item=el('div');item.append(el('strong','',label),el('small','',`${data.apps.length} 个 App · ${data.folders.length} 个文件夹 · ${data.pages.length} 张桌面`));versions.append(item);}conflict.append(versions);
+      const differences=el('div','sync-differences');for(const path of cloudStatus.conflict.fields.slice(0,4)){
+        if(path==='App 或组件的位置'){differences.append(el('p','',`本机分组：${state.folders.map(folder=>folder.name).join('、')||'无'}；云端分组：${remote.state.folders.map(folder=>folder.name).join('、')||'无'}`));continue;}
+        const row=el('div','sync-difference');row.append(el('strong','',syncFieldLabel(path)),el('span','',`本机：${syncDifference(path,state)}`),el('span','',`云端：${syncDifference(path,remote.state)}`));differences.append(row);
+      }conflict.append(differences);
+      const choices=el('div','sync-actions');choices.append(action('使用云端版本',()=>cloudSync.resolve('cloud'),'button-primary'),action('保留本机版本',()=>cloudSync.resolve('local')),action('下载两个版本',()=>downloadJSON({local:clone(state),cloud:remote.state,cloudRevision:remote.revision},'weboss-sync-conflict.json')));conflict.append(choices);root.append(conflict);
+    }
+    if(cloudStatus.backups?.length){
+      const backup=el('div','sync-backup-card');backup.append(el('h4','','本机恢复备份'),el('p','','保留最近三份同步前的桌面，仅存于此设备。恢复后可继续同步。'));
+      const select=field('选择备份',syncBackupId,'select',cloudStatus.backups.map(item=>[item.id,`${new Date(item.savedAt).toLocaleString('zh-CN')} · ${item.label}`]));if(!select.input.value)select.input.value=cloudStatus.backups[0].id;syncBackupId=select.input.value;select.input.addEventListener('change',()=>syncBackupId=select.input.value);backup.append(select.wrap);
+      const buttons=el('div','sync-actions');buttons.append(action('恢复此备份',()=>cloudSync.restoreBackup(syncBackupId)),action('下载此备份',()=>{const item=cloudSync.backups.find(item=>item.id===syncBackupId);if(item)downloadJSON(item.state,'weboss-local-backup.json');}));backup.append(buttons);root.append(backup);
+    }
   }
   function importLegacy(data) {
     if(Array.isArray(data.apps))return data;
@@ -1277,7 +1356,8 @@ import {normalizePages, reconcileDesktop} from './desktop-model.js';
   $('#desktopShell').addEventListener('dragstart',event=>event.preventDefault());
   $('#folderDialog').addEventListener('dragstart',event=>event.preventDefault());
   $('#editorDialog').addEventListener('cancel',event=>{event.preventDefault();closeEditor();});
-  $('#settingsTabs').addEventListener('click',event=>{const tab=event.target.closest('[data-tab]');if(!tab)return;settingsTab=tab.dataset.tab;renderSettings();});
+  $('#settingsTabs').addEventListener('click',event=>{const tab=event.target.closest('[data-tab]');if(!tab)return;settingsTab=tab.dataset.tab;renderSettings();if(settingsTab==='sync')checkSyncService();});
+  $('#cloudSyncButton').addEventListener('click',event=>{openSettings(event.currentTarget,'sync');checkSyncService();});
   $('#editorClose').addEventListener('click',closeEditor);
   $('#editorCancel').addEventListener('click',closeEditor);
   $('#editorDelete').addEventListener('click',deleteEditor);
@@ -1339,5 +1419,14 @@ import {normalizePages, reconcileDesktop} from './desktop-model.js';
   setInterval(()=>{if(state.wallpaper==='bing')loadBingWallpaper();},3600000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.wallpaper==='bing')loadBingWallpaper();});
 
-  updateSearchPreferences();setWallpaper();renderPages();renderDock();save();loadWeather();updateClock();setInterval(updateClock,30000);
+  cloudSync=new CloudSync({getState:()=>clone(state),applyState:applySyncedState,isBusy:syncBusy,onStatus:updateSyncStatus,version:defaults.version});
+  window.addEventListener('storage',event=>{
+    if(event.key===SYNC_STORAGE_KEY&&event.newValue!==cloudSync.key){cloudSync.disconnect(false);cloudSync.init();}
+    if(event.key===STORAGE_KEY&&event.newValue){pendingExternalState=true;if(!syncBusy()){try{const next=JSON.parse(event.newValue);if(!sameState(next,state))applySyncedState(next);cloudSync.localChanged();}catch{}}}
+  });
+  setInterval(()=>{if(pendingExternalState&&!syncBusy()){try{const next=JSON.parse(localStorage.getItem(STORAGE_KEY));if(next&&!sameState(next,state))applySyncedState(next);pendingExternalState=false;cloudSync.localChanged();}catch{}}},1000);
+  setInterval(()=>{if(!document.hidden)cloudSync.run();},12000);
+  window.addEventListener('online',()=>cloudSync.run());window.addEventListener('offline',()=>{if(cloudSync.key)cloudSync.status('offline');});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)cloudSync.run();});
+  updateSearchPreferences();setWallpaper();renderPages();renderDock();save();loadWeather();updateClock();setInterval(updateClock,30000);cloudSync.init();
 })();

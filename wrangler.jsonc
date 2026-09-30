@@ -16,7 +16,10 @@
       "keep_bindings": ["d1", "ai", "secret_text", "secret_key"]
     }
   },
-  "ratelimits": [{"name":"AI_LIMITER","namespace_id":"10420930","simple":{"limit":6,"period":60}}],
+  "ratelimits": [
+    {"name":"AI_LIMITER","namespace_id":"10420930","simple":{"limit":6,"period":60}},
+    {"name":"SYNC_LIMITER","namespace_id":"10420931","simple":{"limit":60,"period":60}}
+  ],
   "observability": {
     "enabled": true,
     "traces": {"enabled":true},

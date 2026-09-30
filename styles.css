@@ -239,6 +239,26 @@ dialog{border:0;padding:0;max-width:none;max-height:none;color:var(--ink)}dialog
 /* Free-form folders: complete cells, direct launch, and an explicit overflow entry. */
 *{scrollbar-width:none!important;-ms-overflow-style:none}
 *::-webkit-scrollbar{display:none;width:0;height:0}
+.cloud-sync-button{position:relative;font-size:19px}
+.cloud-sync-button:after{content:'';position:absolute;width:6px;height:6px;right:5px;bottom:5px;border:2px solid rgba(255,255,255,.9);border-radius:50%;background:#9cabae}
+.cloud-sync-button[data-phase="synced"]:after{background:#6ca891}
+.cloud-sync-button[data-phase="pending"]:after,.cloud-sync-button[data-phase="syncing"]:after{background:#d5b567}
+.cloud-sync-button[data-phase="conflict"]:after,.cloud-sync-button[data-phase="error"]:after{background:#d78f82}
+.sync-status-card{display:flex;align-items:center;gap:15px;padding:19px 20px;margin:20px 0 10px;border-radius:20px;background:#eaf2ef;border:1px solid #e1ebe6;color:#36565d}
+.sync-status-icon{display:grid;place-items:center;width:45px;height:45px;flex:none;border-radius:15px;background:rgba(255,255,255,.65);font-size:24px;color:#688f91}
+.sync-status-card strong{font-size:14px}.sync-status-card p{font-size:11px;color:#749194;margin:6px 0 0;line-height:1.6;overflow-wrap:anywhere}
+.sync-status-card.error,.sync-status-card.conflict{background:#fbefea;border-color:#efddd4}.sync-status-card.offline{background:#f3f1ea;border-color:#e9e4d8}
+.sync-connect-card,.sync-conflict-card,.sync-backup-card{padding:20px;margin:18px 0;border-radius:20px;border:1px solid #e3ece7;background:rgba(255,255,255,.56)}
+.sync-connect-card h4,.sync-conflict-card h4,.sync-backup-card h4{margin:0;font-size:14px;font-weight:700;color:#36565d}
+.sync-connect-card p,.sync-conflict-card p,.sync-backup-card p{margin:8px 0 15px;font-size:12px;line-height:1.7;color:#6d898e}
+.sync-connect-card>.field{margin-bottom:14px}.sync-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:12px}
+.sync-conflict-card{background:#fff7f0;border-color:#efdfd1}.sync-conflict-card .sync-conflict-fields{color:#9c765c;font-size:11px}
+.sync-versions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sync-versions>div{border-radius:12px;padding:12px;background:rgba(255,255,255,.65)}
+.sync-versions strong,.sync-versions small{display:block}.sync-versions strong{font-size:12px;color:#546d72}.sync-versions small{font-size:10px;margin-top:6px;line-height:1.6;color:#839899}
+.sync-differences{margin-top:14px}.sync-difference{display:grid;gap:6px;padding:10px 0;border-top:1px solid rgba(186,149,119,.15);font-size:11px;line-height:1.6;color:#7e8783;overflow-wrap:anywhere}.sync-difference strong{font-size:11px;color:#8c7762}
+.sync-service-note{padding:12px 15px;border-radius:13px;background:#edf2f0;color:#688389;font-size:11px;line-height:1.8}
+.sync-actions button:disabled,.sync-connect-card button:disabled{opacity:.55;cursor:default}
+@media(max-width:700px){.sync-status-card{padding:15px;gap:11px}.sync-connect-card,.sync-conflict-card,.sync-backup-card{padding:16px}.sync-versions{grid-template-columns:1fr}}
 [hidden]{display:none!important}
 .top-tool{display:flex;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.7);border-radius:20px;padding:9px 13px;background:rgba(255,255,255,.5);color:#355e65;font-size:11px;backdrop-filter:blur(16px);transition:background .2s,transform .2s}
 .top-tool:hover{background:rgba(255,255,255,.85);transform:translateY(-2px)}
