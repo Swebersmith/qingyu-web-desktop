@@ -15,4 +15,4 @@ createServer(async (request, response) => {
     response.writeHead(200, { 'content-type': types[extname(path)] || 'application/octet-stream', 'cache-control': 'no-cache' });
     response.end(await readFile(path));
   } catch { response.writeHead(404); response.end('Not found'); }
-}).listen(port, () => console.log(`晴屿 Desktop: http://localhost:${port}`));
+}).listen(port, () => console.log(`Weboss: http://localhost:${port}`));

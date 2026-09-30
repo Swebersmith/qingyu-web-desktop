@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#d9eced" />
-    <meta name="description" content="晴屿 Desktop · 属于自己的轻盈 Web 桌面" />
-    <title>晴屿 Desktop</title>
+    <meta name="description" content="Weboss · 属于自己的 Web 平板桌面" />
+    <title>Weboss</title>
     <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -18,7 +18,6 @@
         <div class="top-context"><span id="topPageName">首页</span><span class="top-context-separator">·</span><span id="topDate"></span></div>
         <div class="top-actions">
           <button class="round-action" id="editModeButton" type="button" title="整理桌面" aria-label="整理桌面">✦</button>
-          <button class="round-action" id="settingsButton" type="button" title="设置" aria-label="设置">⚙</button>
         </div>
       </header>
 
@@ -55,21 +54,33 @@
       </section>
     </div>
 
-    <dialog class="settings-dialog" id="settingsDialog" aria-label="桌面设置">
+    <div class="window-overlay" id="settingsOverlay" aria-hidden="true"><div class="window-backdrop" id="settingsBackdrop"></div></div>
+    <dialog class="settings-dialog morph-surface" id="settingsDialog" aria-label="Weboss 设置">
       <div class="settings-frame">
         <header class="settings-head">
-          <div><p class="section-eyebrow">MAKE IT YOURS</p><h2>自定义桌面</h2></div>
+          <div><p class="section-eyebrow">WEBOSS</p><h2>桌面设置</h2></div>
           <button class="icon-button" id="settingsClose" type="button" aria-label="关闭设置">×</button>
         </header>
         <nav class="settings-tabs" id="settingsTabs" aria-label="设置分类">
           <button type="button" data-tab="apps" class="active">App</button>
           <button type="button" data-tab="widgets">Widget</button>
+          <button type="button" data-tab="folders">文件夹</button>
           <button type="button" data-tab="todos">今日计划</button>
           <button type="button" data-tab="dock">Dock</button>
           <button type="button" data-tab="appearance">外观</button>
           <button type="button" data-tab="data">数据</button>
         </nav>
         <div class="settings-content" id="settingsContent"></div>
+      </div>
+    </dialog>
+
+    <div class="window-overlay" id="folderOverlay" aria-hidden="true"><div class="window-backdrop" id="folderBackdrop"></div></div>
+    <dialog class="folder-dialog morph-surface" id="folderDialog" aria-label="文件夹">
+      <div class="folder-frame">
+        <header class="folder-head"><div><p class="section-eyebrow">APP COLLECTION</p><input id="folderName" maxlength="32" aria-label="文件夹名称" /></div><button class="icon-button" id="folderClose" type="button" aria-label="关闭文件夹">×</button></header>
+        <div class="folder-hint"><span>长按或拖动整理 · 拖出文件夹放回桌面</span><button class="chip-button" id="folderManage" type="button">编辑</button></div>
+        <div class="folder-app-grid" id="folderGrid"></div>
+        <nav class="folder-pagination" id="folderPagination" aria-label="文件夹分页"></nav>
       </div>
     </dialog>
 

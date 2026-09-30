@@ -1,6 +1,10 @@
 /* 默认桌面配置。结构保持为纯 JSON 数据，方便增删快捷方式。 */
 window.DEFAULT_DESKTOP_CONFIG = {
-  version: 2,
+  version: 3,
+  folders: [],
+  searchLabel: "搜索 App、网站或直接上网",
+  searchEngine: "google",
+  bingWallpaper: null,
   layout: { desktop: {}, tablet: {}, mobile: {} },
   wallpaper: "sunny",
   customWallpaper: "",
@@ -12,6 +16,7 @@ window.DEFAULT_DESKTOP_CONFIG = {
     { id: "tools", name: "工具 · 开发", eyebrow: "MAKE SOMETHING NEW", title: "灵感，现在开始。" }
   ],
   apps: [
+    { id: "weboss-settings", system: "settings", name: "设置", icon: "⚙", iconMode: "custom", color: "#78949d", page: "home", category: "系统" },
     { id: "chatgpt", name: "ChatGPT", url: "https://chatgpt.com", icon: "✳", color: "#263f38", page: "home", category: "常用", dock: true },
     { id: "github", name: "GitHub", url: "https://github.com", icon: "GH", color: "#252b3a", page: "home", category: "开发", dock: true },
     { id: "bilibili", name: "B站", url: "https://www.bilibili.com", icon: "▣", color: "#ee8fa7", page: "home", category: "影音", dock: true },

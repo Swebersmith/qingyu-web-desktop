@@ -41,7 +41,7 @@ dialog{border:0;padding:0;max-width:none;max-height:none;color:var(--ink)}dialog
 .clock-message{position:absolute;left:19px;bottom:14px;font-size:11px;color:#567078;margin:0!important}
 .desktop-canvas .widget-card[data-type="calendar"] .calendar-days{line-height:17px}
 .desktop-canvas .widget-card[data-type="calendar"] .calendar-week{margin:4px 0 2px}
-.drag-ghost{position:fixed!important;z-index:80!important;margin:0!important;pointer-events:none!important;transform:none!important;opacity:.95!important;box-shadow:0 24px 60px rgba(28,55,61,.28)!important;transition:none!important}
+.drag-ghost{position:fixed!important;z-index:80!important;margin:0!important;pointer-events:none!important;transform:none!important;opacity:.95;box-shadow:0 24px 60px rgba(28,55,61,.28)!important;transition:none!important}
 .desktop-canvas .is-dragging{opacity:.22!important}
 .dock-app{touch-action:none}
 .dock-app.dock-dragging{z-index:4;transition:none;pointer-events:none}
@@ -132,3 +132,105 @@ dialog{border:0;padding:0;max-width:none;max-height:none;color:var(--ink)}dialog
 .search-overlay.open .search-field,.search-overlay.open .search-body,.search-overlay.open .engine-bar{opacity:1}
 .search-overlay.open .search-body{transform:translateY(0)}
 @media(max-width:700px){.search-panel{width:calc(100vw - 24px)}.search-field{min-height:58px;padding:12px 15px}.search-body{padding:14px 16px}.engine-bar{padding:10px 15px}}
+
+/* Weboss: one pointer gesture for every App, regardless of its surface. */
+.app-icon,.tiny-app-icon,.app-name,.icon-fallback{pointer-events:none;user-select:none;-webkit-user-select:none}
+.app-icon img,.tiny-app-icon img{-webkit-user-drag:none;pointer-events:none}
+.app-shortcut,.dock-app,.folder-tile{user-select:none;-webkit-user-select:none;touch-action:none}
+.is-dragging{opacity:.22!important;pointer-events:none!important}
+.drag-active .app-shortcut:hover,.drag-active .dock-app:hover,.drag-active .widget-card:hover,.drag-active .app-icon{transform:none}
+.drag-active .window-overlay,.drag-active .folder-dialog{pointer-events:none!important}
+.dock{position:relative}
+.dock-drop-ready{outline:2px solid #6aabaf;outline-offset:5px;background:rgba(248,255,252,.88)}
+.dock-insert-marker{position:absolute;top:12px;bottom:12px;width:3px;border-radius:4px;background:#3d858f;pointer-events:none}
+.folder-group-ready{border-radius:22px;background:rgba(225,247,243,.72);outline:2px solid #6aabaf;transform:scale(1.03)!important}
+.folder-group-ready::after{content:'建立文件夹';position:absolute;bottom:-18px;font-size:9px;white-space:nowrap;color:#2f6d77;background:#edf7f4;border-radius:6px;padding:2px 5px}
+.folder-drop-ready{outline:2px solid #67a9ae;outline-offset:4px;box-shadow:0 0 0 8px rgba(211,240,234,.4)}
+.folder-slot-target{background:rgba(212,239,231,.55);outline:2px dashed #67a9ae;border-radius:18px}
+.folder-tile{position:relative;display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;overflow:hidden;padding:12px;border:1px solid rgba(255,255,255,.78);border-radius:25px;background:rgba(241,250,247,.55);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:var(--shadow);cursor:grab;transition:box-shadow .24s,transform .24s var(--ease)}
+.folder-tile-head{display:flex;align-items:center;justify-content:space-between;gap:5px;width:100%;padding:0;border:0;background:transparent;color:#40686e;text-align:left;font-size:11px;min-height:17px;flex:none}
+.folder-tile-head strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.folder-tile-head span{flex:none;font-size:9px;color:#7e9a9d}
+.folder-tile-grid{display:grid;grid-template-columns:repeat(var(--folder-cols,2),minmax(0,1fr));align-content:start;gap:10px 6px;min-height:0;overflow:hidden;flex:1}
+.folder-tile .folder-app{justify-content:start;min-height:0;gap:4px}
+.desktop-canvas .folder-app .app-icon{width:clamp(30px,4vw,44px);height:clamp(30px,4vw,44px);border-radius:13px;font-size:17px}
+.desktop-canvas .folder-app .app-name{font-size:9px}
+.folder-tile .folder-app>a{gap:4px}
+.folder-resize-handle{display:none;position:absolute;bottom:2px;right:2px;width:29px;height:29px;z-index:5;border:0;border-radius:10px;background:rgba(255,255,255,.8);color:#3e858e;font-size:24px;line-height:1;cursor:nwse-resize;touch-action:none}
+.editing .folder-resize-handle{display:block}
+.folder-tile.compact{background:transparent;padding:0;border:0;box-shadow:none;backdrop-filter:none;overflow:visible;align-items:center;justify-content:center;gap:6px}
+.folder-tile.compact .folder-tile-head{display:none}
+.folder-mini-open{width:60px;height:60px;border:1px solid rgba(255,255,255,.85);border-radius:19px;padding:8px;background:rgba(236,246,241,.75);box-shadow:0 7px 18px rgba(43,76,80,.16);backdrop-filter:blur(15px)}
+.folder-mini-open .folder-tile-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;height:100%}
+.folder-mini-open .tiny-app-icon{width:12px;height:12px;border-radius:4px;font-size:6px}
+.folder-empty{font-size:10px;color:#719292;grid-column:1/-1;align-self:center;text-align:center}
+.folder-slim:not(.compact){padding:6px 9px;gap:3px;border-radius:18px}
+.folder-slim:not(.compact) .app-name{display:none}
+.folder-slim:not(.compact) .app-icon{width:29px;height:29px;border-radius:8px}
+.folder-slim:not(.compact) .folder-tile-head{font-size:9px;min-height:12px}
+.folder-slim:not(.compact) .folder-tile-grid{gap:4px}
+.folder-member-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:240px;overflow:auto;border:1px solid #e2ede8;border-radius:13px;padding:8px}
+.folder-member{display:flex;align-items:center;gap:6px;font-size:11px;min-width:0;padding:4px;border-radius:8px;background:#f0f6f2}
+.folder-member span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.folder-member input{accent-color:#487d83}
+.editor-dialog{max-height:calc(100dvh - 24px);overflow-y:auto}
+.context-folder-choices{max-height:140px;overflow:auto}
+
+/* Geometry is animated on the same surface for both opening and closing. */
+.surface-origin-hidden{visibility:hidden!important}
+.window-overlay{position:fixed;inset:0;z-index:40;visibility:hidden;pointer-events:none}
+.window-overlay.open{visibility:visible;pointer-events:auto}
+.window-backdrop{position:absolute;inset:0;background:rgba(30,52,60,.23);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);opacity:0;transition:opacity .38s ease}
+.window-overlay.open .window-backdrop{opacity:1}
+.window-overlay.closing .window-backdrop{opacity:0}
+.morph-surface{position:fixed;margin:0;z-index:44;overflow:hidden;transform:none;transition:none;box-shadow:0 30px 90px rgba(25,47,55,.26);background:rgba(248,252,249,.97);border:1px solid rgba(255,255,255,.9)}
+.morph-surface:not([open]){display:none}
+.morph-surface.surface-closing{pointer-events:none}
+.settings-frame,.folder-frame{pointer-events:auto}
+.surface-closing .settings-frame,.surface-closing .folder-frame,.drag-active .folder-frame{pointer-events:none!important}
+.surface-seed{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;z-index:3;overflow:hidden;opacity:0}
+.surface-seed .app-icon{width:100%;height:100%;border-radius:inherit;font-size:clamp(24px,5vw,44px);box-shadow:none}
+.surface-seed .surface-origin-hidden{visibility:visible!important}
+.folder-seed-icon{color:#609297;font-size:34px}
+.search-seed{display:flex;align-items:center;justify-content:flex-start;gap:11px;padding:0 16px;white-space:nowrap;color:#637c80;font-size:13px}
+.search-overlay,.search-overlay.open{opacity:1;transition:none}
+.search-overlay{z-index:45;pointer-events:none}
+.search-overlay.open{pointer-events:auto}
+.search-overlay.closing .search-backdrop{opacity:0}
+.search-backdrop{opacity:0;transition:opacity .38s ease}
+.search-overlay.open .search-backdrop{opacity:1}
+.search-overlay.open.closing .search-backdrop{opacity:0}
+.search-panel,.search-overlay.open .search-panel{transform:none!important;opacity:1;transition:none!important;bottom:auto!important;margin:0;display:flex}
+.search-field,.search-body,.engine-bar{opacity:1;transform:none!important;transition:none!important}
+.search-body{min-height:0}
+.search-pill.search-morphing{opacity:1;transform:none}
+.folder-dialog{background:rgba(243,250,246,.95);height:500px;width:620px}
+.folder-frame{height:100%;display:flex;flex-direction:column;padding:25px}
+.folder-head{display:flex;justify-content:space-between;align-items:center;gap:20px}
+.folder-head input{width:100%;font-weight:700;font-size:26px;border:0;background:transparent;color:#31575e;margin-top:5px;padding:0;outline:0}
+.folder-hint{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:17px 0 24px;color:#7b9599;font-size:10px}
+.folder-app-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:repeat(3,minmax(0,1fr));gap:18px 10px;flex:1;min-height:0;align-items:start;touch-action:none}
+.folder-app-grid .app-shortcut>a{display:flex;align-items:center;flex-direction:column;gap:8px}
+.folder-app-grid .app-icon{width:58px;height:58px;font-size:22px}
+.folder-pagination{display:flex;justify-content:center;gap:9px;padding-top:23px}
+.folder-pagination button{border:0;padding:0;width:6px;height:6px;border-radius:8px;background:#adc2c1}
+.folder-pagination button.active{width:19px;background:#578f93}
+.folder-empty-add{grid-column:1/-1;grid-row:1/-1;border:1px dashed #a9c6c3;border-radius:20px;background:rgba(255,255,255,.4);color:#5f8f92;align-self:stretch}
+.app-context-menu{z-index:90}
+.wallpaper-swatch.bing{display:grid;place-items:center;background:linear-gradient(135deg,#8dc3bb,#7c9fcb);color:#fff;font-size:13px}
+@media(max-width:700px){
+  .dock{gap:3px;padding:6px}
+  .dock-app:nth-child(n){display:grid}
+  .dock-app .app-icon{width:min(36px,calc((100vw - 62px)/var(--dock-count,8) - 3px));height:min(36px,calc((100vw - 62px)/var(--dock-count,8) - 3px));font-size:14px;border-radius:10px}
+  .dock-more{width:30px;height:30px;flex:none}
+  .folder-frame{padding:20px 16px}
+  .folder-head input{font-size:22px}
+  .folder-app-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 8px}
+  .folder-app-grid .app-icon{width:54px;height:54px}
+  .folder-hint{font-size:9px;margin-bottom:20px}
+  .folder-tile{padding:9px;border-radius:20px}
+  .folder-tile-grid{gap:7px 3px}
+  .folder-mini-open{width:54px;height:54px;border-radius:16px}
+  .desktop-canvas .folder-app .app-icon{width:35px;height:35px;border-radius:10px}
+  .search-seed{font-size:11px}
+}
