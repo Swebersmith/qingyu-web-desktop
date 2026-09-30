@@ -19,7 +19,7 @@
 
 ## 本地运行
 
-需要 Node.js 18+，没有第三方运行依赖。
+静态构建需要 Node.js 18+。Workers 部署需要使用 Wrangler 支持的 Node.js 版本，建议 Node.js 22 或 24；网页本身没有第三方运行依赖。
 
 ```bash
 npm run dev
@@ -35,6 +35,53 @@ npm run build
 ```
 
 `dist/` 是可直接部署到 GitHub Pages、Cloudflare Pages、Vercel 或任意静态服务器的目录。GitHub Pages 也可直接发布仓库根目录。
+
+### Cloudflare Workers
+
+仓库已包含 `worker.js` 和 `wrangler.jsonc`。`assets.directory` 指向 `./dist`，页面资源由 Workers Static Assets 托管，Worker 入口通过 `ASSETS` 绑定处理其余请求。
+
+在 Cloudflare 的 Workers & Pages 中导入本仓库，按以下配置部署：
+
+| 配置项 | 值 |
+| --- | --- |
+| Worker 名称 | `weboss`（与 `wrangler.jsonc` 中的 `name` 一致） |
+| 生产分支 | `main` |
+| 构建命令 | `npm run build` |
+| 部署命令 | `npm run deploy`（等价于 `wrangler deploy`） |
+| 根目录 / 高级设置 → 路径 | 留空 |
+
+不需要另填构建输出目录；`dist` 已在 Wrangler 配置里声明。部署成功后访问控制台提供的 `workers.dev` 地址。
+
+在本地检查 Workers 构建或预览：
+
+```bash
+npm ci
+npm run check
+npm run check:worker
+npm run dev:worker
+```
+
+`check:worker` 只进行部署构建检查，不会发布到 Cloudflare。手动发布前运行 `npx wrangler login`，随后执行 `npm run build` 和 `npm run deploy`。
+
+### 新 D1 数据库
+
+当前版本仍使用浏览器 `localStorage`，还没有 D1 读写和云端同步接口。配置中暂不包含数据库 ID，页面可以直接部署。
+
+准备接入数据库时，在 Cloudflare 的 Storage & databases → D1 SQL Database 中创建全新数据库，例如 `weboss-db`；复制它的 Database ID，然后在 `wrangler.jsonc` 顶层添加以下字段并重新部署：
+
+```json
+"d1_databases": [
+  {
+    "binding": "DB",
+    "database_name": "weboss-db",
+    "database_id": "填写新数据库的真实 UUID"
+  }
+]
+```
+
+添加字段时保留正确的 JSON 逗号。后续 Worker 接口使用 `env.DB` 访问新库；表结构、身份验证和前端同步需要一并实现，绑定数据库本身不会改变当前本地保存行为。
+
+部署配置参考 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/) 和 [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/)；数据库绑定参考 [D1 入门文档](https://developers.cloudflare.com/d1/get-started/)。
 
 ## 自定义
 

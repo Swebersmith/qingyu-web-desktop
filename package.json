@@ -6,6 +6,12 @@
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
-    "check": "node --check script.js && node --check config.js && node --check scripts/build.mjs && node --check scripts/serve.mjs"
+    "check": "node --check script.js && node --check config.js && node --input-type=module --check < worker.js && node --check scripts/build.mjs && node --check scripts/serve.mjs",
+    "dev:worker": "npm run build && wrangler dev",
+    "deploy": "wrangler deploy",
+    "check:worker": "npm run build && wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "wrangler": "^4.144.0"
   }
 }
