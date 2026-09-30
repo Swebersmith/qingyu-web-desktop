@@ -82,10 +82,19 @@
     <div class="window-overlay" id="folderOverlay" aria-hidden="true"><div class="window-backdrop" id="folderBackdrop"></div></div>
     <dialog class="folder-dialog morph-surface" id="folderDialog" aria-label="文件夹">
       <div class="folder-frame">
-        <header class="folder-head"><div><p class="section-eyebrow">APP COLLECTION</p><input id="folderName" maxlength="32" aria-label="文件夹名称" /></div><button class="icon-button" id="folderClose" type="button" aria-label="关闭文件夹">×</button></header>
-        <div class="folder-hint"><span>拖动排序 · 拖出放回桌面</span><div><button class="chip-button" id="folderBatch" type="button">多选</button><button class="chip-button" id="folderManage" type="button">添加 / 编辑</button></div></div>
+        <header class="folder-head"><div><p class="section-eyebrow">APP COLLECTION</p><h2 id="folderTitle" tabindex="-1"></h2><input id="folderName" hidden maxlength="32" aria-label="文件夹名称" /></div><button class="icon-button" id="folderClose" type="button" aria-label="关闭文件夹">×</button></header>
+        <div class="folder-hint"><span>拖动排序 · 拖出放回桌面</span><div><button class="chip-button" id="folderRename" type="button">重命名</button><button class="chip-button" id="folderBatch" type="button">多选</button><button class="chip-button" id="folderManage" type="button">添加 / 编辑</button></div></div>
         <div class="folder-app-grid" id="folderGrid"></div>
         <nav class="folder-pagination" id="folderPagination" aria-label="文件夹分页"></nav>
+      </div>
+    </dialog>
+
+    <div class="window-overlay" id="widgetOverlay" aria-hidden="true"><div class="window-backdrop" id="widgetBackdrop"></div></div>
+    <dialog class="widget-dialog morph-surface" id="widgetDialog" aria-label="小组件详情">
+      <div class="widget-frame">
+        <header class="settings-head"><div><p class="section-eyebrow">A LITTLE MORE OF YOUR DAY</p><h2 id="widgetTitle" tabindex="-1">小组件详情</h2></div><button class="icon-button" id="widgetClose" type="button" aria-label="关闭小组件详情">×</button></header>
+        <div class="widget-detail-body" id="widgetDetails"></div>
+        <footer class="widget-detail-footer"><span id="widgetDetailHint">你的生活，在这里继续</span><button class="button-secondary" id="widgetManage" type="button">编辑小组件</button></footer>
       </div>
     </dialog>
 

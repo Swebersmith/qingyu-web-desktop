@@ -2,6 +2,8 @@ import {suggestGroups, validateGroups, folderMetrics, organizationSignals} from 
 import {normalizePages, reconcileDesktop} from './desktop-model.js';
 import {CloudSync,SYNC_STORAGE_KEY} from './sync-client.js';
 import {generateSyncKey,sameState} from './sync-model.js';
+import {importDesktop} from './desktop-import.js';
+import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-model.js';
 
 (() => {
   'use strict';
@@ -10,7 +12,6 @@ import {generateSyncKey,sameState} from './sync-model.js';
   const defaults = window.DEFAULT_DESKTOP_CONFIG;
   const $ = (selector, root = document) => root.querySelector(selector);
   const clone = value => JSON.parse(JSON.stringify(value));
-  const defaultPageIds = defaults.pages.map(page => page.id);
   const newDefaultAppIds = new Set(['x','telegram','baidu','douban','maps','taobao','mooc','coursera','arxiv','wikipedia','deepl','keep','qqmusic','twitch','doubanmovie','doubanmusic','bilibangumi','epic','stackoverflow','mdn','codepen','vercel','unsplash','tinypng']);
   const quotes = [
     '生活嘛，就是要开心一点。',
@@ -44,7 +45,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
     if (!sourceApps.some(app=>app?.id==='weboss-settings')) sourceApps.push(defaults.apps.find(app=>app.id==='weboss-settings'));
     if ((Number(raw.version) || 1) < 2) defaults.apps.forEach(app => { if (newDefaultAppIds.has(app.id) && !sourceApps.some(item => item.id === app.id)) sourceApps.push(app); });
     data.apps = sourceApps.filter(item => item && (validUrl(item.url) || item.id==='weboss-settings')).map(item => ({
-      id: String(item.id || crypto.randomUUID()), name: String(item.name || '未命名').slice(0, 32),
+      id: String(item.id || crypto.randomUUID()), name: String(item.name || '未命名').slice(0, 64),
       url: validUrl(item.url), system: item.id==='weboss-settings'?'settings':undefined, icon: String(item.icon || '✦').slice(0, 180),
       iconMode: item.iconMode === 'custom' || (!item.iconMode && (!defaults.apps.some(app => app.id === item.id && app.icon === item.icon) && item.id)) ? 'custom' : 'auto',
       color: /^#[\da-f]{6}$/i.test(item.color) ? item.color : '#6c9ca4',
@@ -66,7 +67,8 @@ import {generateSyncKey,sameState} from './sync-model.js';
       id: String(item.id || crypto.randomUUID()), type: String(item.type || 'note'),
       page: pageIds.includes(item.page) ? item.page : fallbackPage,
       size: ['small','medium','wide'].includes(item.size) ? item.size : 'medium',
-      title: String(item.title || '').slice(0, 40), content: String(item.content || '').slice(0, 400)
+      title: String(item.title || '').slice(0, 40), content: item.type==='progress'&&item.content==='本周已完成 4 / 6 个小目标'?'本周学习目标':String(item.content || '').slice(0, 4000),
+      ...(item.type==='progress'?{progress:normalizeProgress(item.progress)}:{})
     }));
     data.todos = (Array.isArray(raw.todos) ? raw.todos : defaults.todos).map(item => ({ id: String(item.id || crypto.randomUUID()), text: String(item.text || '').slice(0, 80), done: !!item.done }));
     data.dock = (Array.isArray(raw.dock) ? raw.dock : defaults.dock).filter(id => data.apps.some(app => app.id === id)).slice(0, 12);
@@ -103,6 +105,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
   let selectedSearch = 0;
   let activeEngine = state.searchEngine;
   let weather = null;
+  let weatherRequest = null;
   let quoteOffset = 0;
   let toastTimer = 0;
   let wheelAt = 0;
@@ -111,6 +114,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
   let resizeState = null;
   let folderId = null;
   let folderPage = 0;
+  let widgetId = null,widgetMonth = new Date(new Date().getFullYear(),new Date().getMonth(),1);
   let bingLoading = false;
   const surfaces = new Map();
   let dropSettling = false;
@@ -158,7 +162,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
     state.dock=state.dock.filter(appId=>appId!==id);const app=appById(id);if(app){app.page=state.pages.some(item=>item.id===page)?page:state.pages[0].id;clearAppLayout(id);}
   }
   function itemById(type,id) { return type==='app'?appById(id):type==='folder'?folderById(id):state.widgets.find(widget=>widget.id===id); }
-  function refreshDesktop() { save();renderPages();renderDock();if(folderId)renderFolderContents();if($('#settingsDialog').open)renderSettings(); }
+  function refreshDesktop() { save();renderPages();renderDock();if(folderId)renderFolderContents();if(widgetId)renderWidgetDetails();if($('#settingsDialog').open)renderSettings(); }
   function isLightColor(hex) {
     const rgb = [1,3,5].map(i => parseInt(hex.slice(i,i+2),16));
     return rgb[0]*.299 + rgb[1]*.587 + rgb[2]*.114 > 185;
@@ -224,6 +228,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
       button.addEventListener('click',()=>{closeAppContext();handler();});menu.append(button);
     };
     if(type==='folder')action('打开文件夹','▦',()=>openFolder(id));
+    if(type==='widget')action('查看详情','↗',()=>openWidgetDetails(id));
     if(type==='app')action(item.system?'打开设置':'打开网站','↗',()=>openApp(item));
     action(type==='app'?'编辑快捷方式':type==='folder'?'编辑文件夹':'编辑 Widget','✎',()=>openEditor(type,id));
     if(type==='app'&&!item.system)action('复制链接','⧉',async()=>{
@@ -238,6 +243,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
       refreshDesktop();toast(inDock?'已放回当前桌面':'已加入 Dock');
     });
     if(type==='app'&&!item.system){
+      action(state.favoriteIds.includes(id)?'取消收藏':'加入收藏','♡',()=>{state.favoriteIds=state.favoriteIds.includes(id)?state.favoriteIds.filter(value=>value!==id):[...state.favoriteIds,id];save();updateWidgetCards('favorites');if(itemById('widget',widgetId)?.type==='favorites')renderWidgetDetails();});
       action('多选 / 批量整理','☑',()=>openOrganizer('bulk',id));
       const folder=folderOfApp(id);
       if(folder)action('移出文件夹','↗',()=>{removeFromFolders(id);refreshDesktop();});
@@ -322,6 +328,8 @@ import {generateSyncKey,sameState} from './sync-model.js';
     const clock = $('#clockText'); if (clock) clock.textContent = time;
     const dateText = $('#clockDate'); if (dateText) dateText.textContent = longDate;
     $('#topDate').textContent = new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'short'}).format(date);
+    const detailTime=$('.detail-local-time');if(detailTime)detailTime.textContent=time;
+    document.querySelectorAll('.world-clock[data-zone]').forEach(node=>$('strong',node).textContent=new Intl.DateTimeFormat('zh-CN',{timeZone:node.dataset.zone,hour:'2-digit',minute:'2-digit'}).format(date));
   }
   function layoutMode() { return innerWidth <= 700 ? 'mobile' : innerWidth <= 1100 ? 'tablet' : 'desktop'; }
   function gridColumns(mode) { return mode === 'mobile' ? 4 : mode === 'tablet' ? 8 : 12; }
@@ -530,7 +538,9 @@ import {generateSyncKey,sameState} from './sync-model.js';
       default: content.append(el('p','note-content',widget.content||'双击卡片，写下你的想法。'));
     }
     const edit=el('button','widget-edit','✎'); edit.type='button'; edit.title='编辑 Widget'; edit.addEventListener('click',() => openEditor('widget',widget.id)); card.append(edit);
-    if (['note','link','progress'].includes(widget.type)) card.addEventListener('dblclick',() => openEditor('widget',widget.id));
+    card.tabIndex=0;card.setAttribute('aria-label',`${widget.title||widgetLabel(widget.type)}，单击查看详情`);
+    card.addEventListener('click',event=>{if(event.defaultPrevented||Date.now()<suppressClickUntil||event.target.closest('button,a,input,label,select,textarea,.player-progress'))return;if(editing)openEditor('widget',widget.id);else openWidgetDetails(widget.id,card);});
+    card.addEventListener('keydown',event=>{if(event.target===card&&['Enter',' '].includes(event.key)){event.preventDefault();openWidgetDetails(widget.id,card);}});
     card.addEventListener('contextmenu',event=>{event.preventDefault();event.stopPropagation();openItemContext('widget',widget.id,event.clientX,event.clientY);});
     attachDrag(card,'widget',widget.id); return card;
   }
@@ -538,6 +548,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
     const size=tileSize({kind:'folder',data:folder},layoutMode()),compact=size.w===1&&size.h===1;
     const tile=el('article',`folder-tile${compact?' compact':''}${sizingFolderId===folder.id?' folder-sizing':''}`);tile.dataset.id=folder.id;tile.dataset.kind='folder';
     if(preview)tile.dataset.preview='true';
+    if(!preview){tile.tabIndex=0;tile.setAttribute('aria-label',`文件夹 ${folder.name}，单击空白处打开`);tile.addEventListener('click',event=>{if(event.defaultPrevented||Date.now()<suppressClickUntil||event.target.closest('button,a,input,.folder-app'))return;openFolder(folder.id,tile);});tile.addEventListener('keydown',event=>{if(event.target===tile&&['Enter',' '].includes(event.key)){event.preventDefault();openFolder(folder.id,tile);}});}
     const head=el('button','folder-tile-head');head.type='button';head.append(el('strong','',folder.name),el('span','',`${folder.appIds.length}  ↗`));head.addEventListener('click',()=>{if(Date.now()<suppressClickUntil)return;openFolder(folder.id,tile);});tile.append(head);
     const grid=el('div','folder-tile-grid');
     if(compact){const open=el('button','folder-mini-open');open.type='button';open.setAttribute('aria-label',`打开 ${folder.name}`);open.append(grid);open.addEventListener('click',()=>{if(Date.now()<suppressClickUntil)return;openFolder(folder.id,tile);});tile.append(open,el('span','app-name',folder.name));}
@@ -598,13 +609,15 @@ import {generateSyncKey,sameState} from './sync-model.js';
   function openFolder(id,origin) {
     const folder=folderById(id);if(!folder)return;
     if(surfaces.has('folder')&&folderId!==id){closeSurface('folder',()=>{folderId=null;openFolder(id,origin);});return;}
-    closeAppContext();folderId=id;folderPage=0;renderFolderContents();
+    closeAppContext();folderId=id;folderPage=0;$('#folderName').hidden=true;$('#folderTitle').hidden=false;renderFolderContents();
     openSurface('folder',origin||document.querySelector(`.desktop-canvas>.folder-tile[data-id="${CSS.escape(id)}"]`));
   }
-  function closeFolder(forDrag=false) { closeSurface('folder',()=>{folderId=null;},forDrag); }
+  function closeFolder(forDrag=false) {finishFolderRename();closeSurface('folder',()=>{folderId=null;},forDrag);}
+  function startFolderRename(){const folder=folderById(folderId);if(!folder)return;const input=$('#folderName');input.value=folder.name;$('#folderTitle').hidden=true;input.hidden=false;input.focus();input.select();}
+  function finishFolderRename(cancel=false){const input=$('#folderName'),folder=folderById(folderId);if(input.hidden)return;input.hidden=true;$('#folderTitle').hidden=false;if(folder&&!cancel){const name=input.value.trim().slice(0,32);if(name&&name!==folder.name){folder.name=name;refreshDesktop();}}if(folder){input.value=folder.name;$('#folderTitle').textContent=folder.name;}}
   function renderFolderContents() {
     const folder=folderById(folderId);if(!folder)return;
-    $('#folderName').value=folder.name;$('#folderDialog').dataset.id=folder.id;
+    $('#folderTitle').textContent=folder.name;if($('#folderName').hidden)$('#folderName').value=folder.name;$('#folderDialog').dataset.id=folder.id;
     const columns=innerWidth<=700?3:4,rows=Math.max(1,Math.min(3,Math.floor((surfaceTarget('folder').height-210+18)/86))),count=columns*rows,total=Math.max(1,Math.ceil(folder.appIds.length/count));folderPage=Math.min(folderPage,total-1);
     const grid=$('#folderGrid');grid.style.gridTemplateRows=`repeat(${rows},minmax(0,1fr))`;grid.replaceChildren();folder.appIds.slice(folderPage*count,(folderPage+1)*count).forEach(id=>{
       const app=appById(id);if(!app)return;const node=renderApp(app);node.classList.add('folder-app');node.dataset.folder=folder.id;grid.append(node);
@@ -614,23 +627,79 @@ import {generateSyncKey,sameState} from './sync-model.js';
   }
   function widgetLabel(type) { return ({clock:'此刻',weather:'今日天气',calendar:'本月日历',quote:'每日一句',todo:'今日计划',progress:'学习进度',recent:'最近访问',favorites:'收藏网站',watching:'继续观看',player:'迷你播放器',note:'便签',link:'快捷链接',quick:'快捷工具'})[type]||'Widget'; }
   function widgetSymbol(type) { return ({clock:'◷',weather:'☀',calendar:'▦',quote:'✿',todo:'✓',progress:'↗',recent:'↗',favorites:'♡',watching:'▶',player:'♫',note:'✎',link:'↗',quick:'⌘'})[type]||'✦'; }
+  function openWidgetDetails(id,origin=null){
+    const widget=itemById('widget',id);if(!widget)return;
+    closeAppContext();widgetId=id;widgetMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);renderWidgetDetails();
+    openSurface('widget',origin||document.querySelector(`.desktop-canvas>.widget-card[data-id="${CSS.escape(id)}"]`));
+  }
+  function closeWidgetDetails(){closeSurface('widget',()=>{widgetId=null;});}
+  function detailButton(label,handler,className='button-secondary'){const button=el('button',className,label);button.type='button';button.addEventListener('click',handler);return button;}
+  function updateTodoSummary(){document.querySelectorAll('.widget-todo-count').forEach(node=>node.textContent=`${state.todos.filter(todo=>todo.done).length} / ${state.todos.length} 已完成`);}
+  function updateWidgetCards(type){
+    document.querySelectorAll(`.desktop-canvas>.widget-card[data-type="${type}"]`).forEach(node=>{const widget=itemById('widget',node.dataset.id),root=$('.widget-content',node);root.replaceChildren();if(type==='todo')renderTodos(root);if(type==='progress')renderProgress(root,widget);if(type==='watching')renderWatching(root);if(type==='favorites')renderLinkList(root,state.favoriteIds.slice(0,3),'favorite');if(type==='quote')renderQuote(root);if(type==='note')root.append(el('p','note-content',widget.content));tileSignatures.set(node,tileSignature({kind:'widget',data:widget}));});
+  }
+  function detailAppList(root,ids){
+    const grid=el('div','widget-detail-app-grid');ids.map(appById).filter(Boolean).forEach(app=>grid.append(renderApp(app)));root.append(grid);
+    if(!grid.children.length)root.append(el('p','widget-empty','这里还没有 App。可在快捷方式右键菜单中加入收藏。'));
+  }
+  function renderWidgetDetails(){
+    const widget=itemById('widget',widgetId);if(!widget){closeWidgetDetails();return;}
+    const root=$('#widgetDetails'),scroll=root.scrollTop;root.replaceChildren();root.dataset.type=widget.type;
+    $('#widgetTitle').textContent=widget.title||widgetLabel(widget.type);$('#widgetDialog').setAttribute('aria-label',`${widget.title||widgetLabel(widget.type)}详情`);
+    const hints={clock:'不同城市，此刻的时间',weather:'天气数据来自 Open-Meteo',calendar:'浏览月份 · 今天的计划',todo:'勾选、添加，完成你的今天',progress:'真实计数 · 自动保存',note:'最长支持 4000 字',quote:'换一句，换个好心情',recent:'最近打开的 12 个 App',favorites:'收藏常用网站，一点即达',watching:'继续观看，或加入新内容',player:'Weboss 原创轻音乐',link:'你的快捷链接',quick:'常用开发与设计工具'};
+    $('#widgetDetailHint').textContent=hints[widget.type]||'你的生活，在这里继续';
+    if(widget.type==='clock'){
+      root.append(el('div','detail-local-time',new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})),el('p','detail-clock-date',new Date().toLocaleDateString('zh-CN',{dateStyle:'full'})));
+      const grid=el('div','world-clock-grid');for(const [name,zone] of [['北京','Asia/Shanghai'],['东京','Asia/Tokyo'],['伦敦','Europe/London'],['纽约','America/New_York']]){const card=el('div','world-clock');card.dataset.zone=zone;card.append(el('span','',name),el('strong','',new Intl.DateTimeFormat('zh-CN',{timeZone:zone,hour:'2-digit',minute:'2-digit'}).format(new Date())));grid.append(card);}root.append(grid);
+    }else if(widget.type==='weather'){
+      renderWeather(root);const metrics=el('div','weather-detail-metrics');for(const [label,value] of [['体感',Number.isFinite(weather?.feels)?Math.round(weather.feels)+'°':'—'],['湿度',Number.isFinite(weather?.humidity)?weather.humidity+'%':'—'],['风速',Number.isFinite(weather?.wind)?Math.round(weather.wind)+' km/h':'—']]){const card=el('div');card.append(el('small','',label),el('strong','',value));metrics.append(card);}root.append(metrics,el('h3','detail-section-title','未来七天'));
+      const list=el('div','weather-forecast');for(const day of weather?.forecast||[]){const info=weatherInfo(day.code),row=el('div','weather-forecast-row');row.append(el('span','',new Date(day.date+'T12:00:00').toLocaleDateString('zh-CN',{weekday:'short',month:'numeric',day:'numeric'})),el('span','',info.symbol+' '+info.label),el('strong','',`${Math.round(day.min)}° / ${Math.round(day.max)}°`),el('small','',Number.isFinite(day.rain)?`降水 ${day.rain}%`:'—'));list.append(row);}root.append(list);
+      if(!list.children.length)root.append(el('p','widget-empty','天气暂不可用，联网后可重新获取。'));root.append(detailButton('刷新天气',loadWeather));
+    }else if(widget.type==='calendar'){
+      const nav=el('div','detail-calendar-nav');nav.append(detailButton('‹ 上个月',()=>{widgetMonth=new Date(widgetMonth.getFullYear(),widgetMonth.getMonth()-1,1);renderWidgetDetails();}),el('strong','',`${widgetMonth.getFullYear()}年 ${widgetMonth.getMonth()+1}月`),detailButton('下个月 ›',()=>{widgetMonth=new Date(widgetMonth.getFullYear(),widgetMonth.getMonth()+1,1);renderWidgetDetails();}));root.append(nav);
+      const week=el('div','calendar-week');'一二三四五六日'.split('').forEach(day=>week.append(el('span','',day)));const grid=el('div','calendar-days detail-calendar-days'),today=new Date();monthGrid(widgetMonth.getFullYear(),widgetMonth.getMonth()).cells.forEach(day=>grid.append(el('span',day===today.getDate()&&widgetMonth.getMonth()===today.getMonth()&&widgetMonth.getFullYear()===today.getFullYear()?'today':'',day===null?'':String(day))));root.append(week,grid,detailButton('回到本月',()=>{widgetMonth=new Date(today.getFullYear(),today.getMonth(),1);renderWidgetDetails();}),el('h3','detail-section-title','今天的计划'));renderTodos(root,Infinity);
+    }else if(widget.type==='todo'){
+      root.append(el('p','widget-todo-count',''));updateTodoSummary();renderTodos(root,Infinity);if(!state.todos.length)root.append(el('p','widget-empty','从一件小事开始，写下今天的计划。'));
+      const form=el('form','widget-inline-form'),input=el('input');input.placeholder='添加今天要做的事…';input.maxLength=80;input.setAttribute('aria-label','新的待办任务');const submit=el('button','button-primary','添加');submit.type='submit';form.append(input,submit);form.addEventListener('submit',event=>{event.preventDefault();const text=input.value.trim();if(!text)return;if(state.todos.length>=500)return toast('最多保存 500 个任务');state.todos.push({id:crypto.randomUUID(),text,done:false});save();updateWidgetCards('todo');renderWidgetDetails();$('#widgetDetails .widget-inline-form input').focus();});root.append(form);
+    }else if(widget.type==='progress'){
+      const progress=progressSummary(widget.progress);root.append(el('div','detail-progress-number',`${progress.percent}%`));renderProgress(root,widget);
+      const form=el('form','detail-progress-form'),value=field('已完成数量',progress.value,'number'),total=field('目标数量',progress.total,'number'),unit=field('计数单位',progress.unit);value.input.min='0';total.input.min='1';value.input.max=total.input.max='100000';value.input.step=total.input.step='any';value.input.required=total.input.required=true;unit.input.maxLength=16;form.append(value.wrap,total.wrap,unit.wrap);const button=el('button','button-primary','保存进度');button.type='submit';form.append(button);form.addEventListener('submit',event=>{event.preventDefault();if(!Number.isFinite(Number(value.input.value))||!Number.isFinite(Number(total.input.value))||Number(total.input.value)<1||Number(value.input.value)<0||Number(value.input.value)>Number(total.input.value))return toast('请输入有效的完成数量和目标');widget.progress=normalizeProgress({value:value.input.value,total:total.input.value,unit:unit.input.value});save();updateWidgetCards('progress');renderWidgetDetails();toast('进度已保存');});root.append(form);
+    }else if(widget.type==='quote'){
+      renderQuote(root);root.append(detailButton('复制这句话',async()=>{const index=(Math.floor(Date.now()/86400000)+quoteOffset)%quotes.length;try{await navigator.clipboard.writeText(quotes[index]);toast('文案已复制');}catch{toast('请选中文案手动复制');}}),el('h3','detail-section-title','给今天的你'));const list=el('div','quote-collection');quotes.forEach((quote,index)=>list.append(detailButton(quote,()=>{quoteOffset=(index-Math.floor(Date.now()/86400000)%quotes.length+quotes.length)%quotes.length;updateWidgetCards('quote');renderWidgetDetails();},'quote-collection-item')));root.append(list);
+    }else if(widget.type==='recent'||widget.type==='favorites'){
+      detailAppList(root,widget.type==='recent'?state.history:state.favoriteIds);
+    }else if(widget.type==='watching'){
+      renderWatching(root,Infinity);const form=el('form','watching-add-form'),title=field('内容名称','','text'),url=field('观看链接','','url');title.input.maxLength=80;title.input.required=url.input.required=true;url.input.placeholder='https://';const button=el('button','button-primary','加入观看列表');button.type='submit';form.append(title.wrap,url.wrap,button);form.addEventListener('submit',event=>{event.preventDefault();const link=validUrl(url.input.value);if(!link)return toast('请输入有效的观看链接');if(state.watching.length>=100)return toast('最多保存 100 条观看内容');state.watching.push({title:title.input.value.trim().slice(0,80),url:link,subtitle:'我的观看列表',tone:'blue',mark:'▶'});save();updateWidgetCards('watching');renderWidgetDetails();});root.append(el('h3','detail-section-title','想看什么？'),form);
+    }else if(widget.type==='player'){
+      const player=el('div','widget-content detail-player');renderPlayer(player);root.append(player);const list=el('div','widget-playlist');musicTracks.forEach((track,index)=>{const button=detailButton(`${String(index+1).padStart(2,'0')}   ${track.title}`,()=>switchTrack(index-music.track),'widget-playlist-item');button.classList.toggle('active',index===music.track);button.dataset.track=index;list.append(button);});root.append(el('h3','detail-section-title','播放列表'),list);
+    }else if(widget.type==='quick'){
+      detailAppList(root,['github','vscode','figma','cloudflare','gitlab','mdn','stackoverflow','codepen','vercel','unsplash','compress'].filter(id=>appById(id)));
+    }else if(widget.type==='link'){
+      root.append(el('p','detail-note',widget.content));const link=el('a','button-primary detail-open-link','打开链接 ↗');link.href=validUrl(widget.content)||'#';link.target='_blank';link.rel='noopener noreferrer';root.append(link);
+    }else{
+      const content=el('textarea','detail-note-editor');content.value=widget.content||'';content.maxLength=4000;content.setAttribute('aria-label','便签全文');content.placeholder='把你的想法写在这里…';root.append(content,detailButton('保存便签',()=>{widget.content=content.value.slice(0,4000);save();updateWidgetCards('note');toast('便签已保存');},'button-primary'));
+    }
+    root.scrollTop=scroll;
+  }
   function renderWeather(root) {
     const top=el('div','weather-top'); const left=el('div'); left.append(el('div','weather-degree',weather ? `${Math.round(weather.temp)}°` : '--°'),el('div','widget-empty',state.city.name));
     top.append(left,el('div','weather-art',weather?.symbol||'☀️')); root.append(top);
-    root.append(el('p','weather-bottom',weather ? `${weather.label} · ${Math.round(weather.min)}° / ${Math.round(weather.max)}°` : '正在获取实时天气…'));
+    root.append(el('p','weather-bottom',weather ? `${weather.label} · ${Math.round(weather.min)}° / ${Math.round(weather.max)}°` : weatherRequest?'正在获取实时天气…':'天气暂不可用 · 请稍后刷新'));
   }
   async function loadWeather() {
+    weatherRequest?.abort();const controller=new AbortController();weatherRequest=controller;const timer=setTimeout(()=>controller.abort(),6500);
     try {
       const { latitude,longitude }=state.city;
-      const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),6500);
-      const url=`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`;
-      const response=await fetch(url,{signal:controller.signal}); clearTimeout(timer);
+      const url=`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code,apparent_temperature,relative_humidity_2m,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max&timezone=auto&forecast_days=7&wind_speed_unit=kmh`;
+      const response=await fetch(url,{signal:controller.signal});
       if (!response.ok) throw Error('weather');
-      const data=await response.json(); const code=data.current.weather_code;
-      const rainy=code>=51&&code<=82, snowy=code>=71&&code<=77;
-      weather={temp:data.current.temperature_2m,min:data.daily.temperature_2m_min[0],max:data.daily.temperature_2m_max[0],label:snowy?'雪':rainy?'雨':code>=95?'雷雨':code>=2?'多云':'晴',symbol:snowy?'❄️':rainy?'🌧️':code>=95?'⛈️':code>=2?'⛅':'☀️'};
-    } catch { weather=null; }
-    document.querySelectorAll('[data-type="weather"] .widget-content').forEach(root => { root.replaceChildren(); renderWeather(root); if(!weather) $('.weather-bottom',root).textContent='天气暂不可用 · 请稍后刷新'; });
+      const data=await response.json();if(!Number.isFinite(data.current?.temperature_2m))throw Error('weather');if(weatherRequest!==controller)return;
+      weather={temp:data.current.temperature_2m,min:data.daily?.temperature_2m_min?.[0]??data.current.temperature_2m,max:data.daily?.temperature_2m_max?.[0]??data.current.temperature_2m,...weatherInfo(data.current.weather_code),feels:data.current.apparent_temperature,humidity:data.current.relative_humidity_2m,wind:data.current.wind_speed_10m,forecast:(Array.isArray(data.daily?.time)?data.daily.time:[]).slice(0,7).map((date,index)=>({date,min:data.daily.temperature_2m_min?.[index],max:data.daily.temperature_2m_max?.[index],code:data.daily.weather_code?.[index],rain:data.daily.precipitation_probability_max?.[index]})).filter(day=>/^\d{4}-\d{2}-\d{2}$/.test(day.date)&&Number.isFinite(day.min)&&Number.isFinite(day.max))};
+    } catch {if(weatherRequest!==controller)return;weather=null;}
+    finally{clearTimeout(timer);}
+    if(weatherRequest!==controller)return;weatherRequest=null;
+    document.querySelectorAll('.desktop-canvas>[data-type="weather"]').forEach(node => {const root=$('.widget-content',node);root.replaceChildren();renderWeather(root);if(!weather)$('.weather-bottom',root).textContent='天气暂不可用 · 请稍后刷新';tileSignatures.set(node,tileSignature({kind:'widget',data:itemById('widget',node.dataset.id)}));});
+    if(itemById('widget',widgetId)?.type==='weather')renderWidgetDetails();
   }
   function renderCalendar(root) {
     const date=new Date(), year=date.getFullYear(), month=date.getMonth(), count=new Date(year,month+1,0).getDate(), offset=(new Date(year,month,1).getDay()+6)%7;
@@ -643,28 +712,28 @@ import {generateSyncKey,sameState} from './sync-model.js';
     const index=(Math.floor(Date.now()/86400000)+quoteOffset)%quotes.length;
     root.append(el('p','quote-body',`“${quotes[index]}”`),el('p','quote-foot','— 给今天的你'));
     const change=el('button','chip-button','换一句'); change.type='button'; change.style.marginTop='10px';
-    change.addEventListener('click',()=>{quoteOffset++;root.replaceChildren();renderQuote(root);}); root.append(change);
+    change.addEventListener('click',()=>{quoteOffset++;updateWidgetCards('quote');if(itemById('widget',widgetId)?.type==='quote')renderWidgetDetails();});root.append(change);
   }
-  function renderTodos(root) {
+  function renderTodos(root,limit=4) {
     const list=el('div','todo-list');
-    state.todos.slice(0,4).forEach(item=>{
+    state.todos.slice(0,limit).forEach(item=>{
       const label=el('label',`todo-item${item.done?' done':''}`); const check=el('input');check.type='checkbox';check.checked=item.done;
       check.dataset.todo=item.id;
-      check.addEventListener('change',()=>{const todo=state.todos.find(todo=>todo.id===item.id);if(todo)todo.done=check.checked;save();document.querySelectorAll('.todo-item input[data-todo]').forEach(input=>{input.checked=!!state.todos.find(todo=>todo.id===input.dataset.todo)?.done;input.closest('.todo-item').classList.toggle('done',input.checked);});document.querySelectorAll('.desktop-canvas>[data-type="todo"]').forEach(node=>tileSignatures.set(node,tileSignature({kind:'widget',data:itemById('widget',node.dataset.id)})));});label.append(check,el('span','',item.text));list.append(label);
+      check.addEventListener('change',()=>{const todo=state.todos.find(todo=>todo.id===item.id);if(todo)todo.done=check.checked;save();document.querySelectorAll('.todo-item input[data-todo]').forEach(input=>{input.checked=!!state.todos.find(todo=>todo.id===input.dataset.todo)?.done;input.closest('.todo-item').classList.toggle('done',input.checked);});document.querySelectorAll('.desktop-canvas>[data-type="todo"]').forEach(node=>tileSignatures.set(node,tileSignature({kind:'widget',data:itemById('widget',node.dataset.id)})));updateTodoSummary();});label.append(check,el('span','',item.text));list.append(label);
     });root.append(list);
   }
   function renderProgress(root,widget) {
-    root.append(el('h3','',widget.content||'本周已完成 4 / 6 个小目标'),el('span','progress-illustration','✎'));
-    const bar=el('div','progress-line');bar.append(el('i'));root.append(bar);
-    const foot=el('p','progress-foot');foot.append(el('span','','继续加油，每一步都算数'),el('span','','67%'));root.append(foot);
+    const progress=progressSummary(widget.progress);root.append(el('h3','',widget.content||'每一步，都离目标更近'),el('span','progress-illustration','✎'));
+    const bar=el('div','progress-line'),fill=el('i');fill.style.width=`${progress.percent}%`;bar.append(fill);root.append(bar);
+    const foot=el('p','progress-foot');foot.append(el('span','',`${progress.value} / ${progress.total} ${progress.unit}`),el('span','',`${progress.percent}%`));root.append(foot);
   }
   function renderLinkList(root,ids,kind) {
     const list=el('div',`${kind}-list`);let count=0;
     ids.forEach(id=>{const app=appById(id);if(!app)return;count++;const link=el('a',`${kind}-link`);link.href=app.url;link.target='_blank';link.rel='noopener noreferrer';link.append(appIcon(app,true),el('span','',app.name));link.addEventListener('click',()=>rememberApp(app.id));list.append(link);});
     root.append(count?list:el('p','widget-empty','打开一个 App，这里会留下足迹。'));
   }
-  function renderWatching(root) {
-    const row=el('div','watching-row');state.watching.slice(0,3).forEach(item=>{const link=el('a',`watch-card ${item.tone||'blue'}`);link.href=validUrl(item.url)||'#';link.target='_blank';link.rel='noopener noreferrer';link.append(el('b','',item.mark||'▶'));const copy=el('div');copy.append(el('strong','',item.title),el('small','',item.subtitle));link.append(copy);row.append(link);});root.append(row);
+  function renderWatching(root,limit=3) {
+    const row=el('div','watching-row');state.watching.slice(0,limit).forEach(item=>{const link=el('a',`watch-card ${['blue','lavender','peach'].includes(item.tone)?item.tone:'blue'}`);link.href=validUrl(item.url)||'#';link.target='_blank';link.rel='noopener noreferrer';link.append(el('b','',item.mark||'▶'));const copy=el('div');copy.append(el('strong','',item.title),el('small','',item.subtitle));link.append(copy);row.append(link);});root.append(row);
   }
   function renderPlayer(root) {
     const track=musicTracks[music.track];const main=el('div','player-main');main.append(el('div','album-art','♫'));
@@ -692,7 +761,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
   }
   function attachDrag(node,type,id) {
     node.addEventListener('pointerdown',event => {
-      if (event.button !== 0 || dragState || resizeState || dropSettling || $('#settingsDialog').open || $('#editorDialog').open || surfaces.has('search')) return;
+      if (event.button !== 0 || dragState || resizeState || dropSettling || $('#settingsDialog').open || $('#editorDialog').open || surfaces.has('search') || surfaces.has('widget')) return;
       if (event.target.closest('.app-edit,.widget-edit,.folder-resize-handle,.folder-resize-edge,.folder-more')) return;
       if(type==='folder'&&event.target.closest('.folder-app'))return;
       if (type === 'widget' && event.target.closest('button,a,input,label,.player-progress')) return;
@@ -918,8 +987,8 @@ import {generateSyncKey,sameState} from './sync-model.js';
     return {panel:name==='search'?$('.search-panel'):$(`#${name}Dialog`),overlay:$(`#${name}Overlay`),content:name==='search'?[$('.search-field'),$('.search-body'),$('.engine-bar')]:[$(`.${name}-frame`)]};
   }
   function surfaceTarget(name) {
-    const width=Math.min(['settings','organizer'].includes(name)?880:name==='folder'?620:650,innerWidth-24);
-    const height=Math.min(['settings','organizer'].includes(name)?660:name==='folder'?500:480,innerHeight-(name==='search'?innerHeight-$('#searchTrigger').getBoundingClientRect().bottom+24:40));
+    const width=Math.min(['settings','organizer'].includes(name)?880:name==='widget'?760:name==='folder'?620:650,innerWidth-24);
+    const height=Math.min(['settings','organizer','widget'].includes(name)?660:name==='folder'?500:480,innerHeight-(name==='search'?innerHeight-$('#searchTrigger').getBoundingClientRect().bottom+24:40));
     return {left:(innerWidth-width)/2,top:name==='search'?$('#searchTrigger').getBoundingClientRect().bottom-height:(innerHeight-height)/2,width,height};
   }
   function geometry(rect,radius) { return {left:`${rect.left}px`,top:`${rect.top}px`,width:`${rect.width}px`,height:`${rect.height}px`,borderRadius:`${radius}px`}; }
@@ -941,7 +1010,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
       context={...nodes,name,origin,originRect:origin.getBoundingClientRect(),originSelector:owner?`${area} [data-id="${CSS.escape(owner.dataset.id)}"]${origin.classList.contains('app-icon')?' .app-icon':''}`:origin.id?`#${origin.id}`:null};surfaces.set(name,context);
       context.seed=el('div',`surface-seed ${name}-seed`);context.seed.setAttribute('aria-hidden','true');
       if(name==='search')context.seed.append(el('span','search-glyph','⌕'),el('span','',state.searchLabel));
-      else if(name==='settings'){const seed=origin.cloneNode(true);seed.removeAttribute('id');seed.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));context.seed.append(seed);}
+      else if(name==='settings'||name==='widget'){const seed=origin.cloneNode(true);seed.removeAttribute('id');seed.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));seed.classList.remove('surface-origin-hidden');context.seed.append(seed);}
       else context.seed.append(el('span','folder-seed-icon','▦'));
       nodes.panel.append(context.seed);if(nodes.panel instanceof HTMLDialogElement)nodes.panel.show();
     }
@@ -954,7 +1023,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
     const seedOpacity=from?getComputedStyle(context.seed).opacity:1;context.seed.getAnimations().forEach(animation=>animation.cancel());context.seed.animate([{opacity:seedOpacity},{opacity:0}],{duration:duration*.5,fill:'forwards'});
     const animation=nodes.panel.animate([geometry(start,startRadius),geometry(target,27)],{duration,fill:'forwards',easing:'cubic-bezier(.22,.7,.2,1)'});context.animation=animation;
     animation.finished.then(()=>{if(context.animation!==animation)return;Object.assign(nodes.panel.style,geometry(target,27));animation.cancel();context.animation=null;context.status='open';}).catch(()=>{});
-    setTimeout(()=>{if(surfaces.get(name)===context&&context.status!=='closing')$(name==='search'?'#searchInput':`#${name}Close`).focus({preventScroll:true});},duration*.6);
+    setTimeout(()=>{if(surfaces.get(name)===context&&context.status!=='closing')$(name==='search'?'#searchInput':name==='folder'?'#folderTitle':name==='widget'?'#widgetTitle':`#${name}Close`).focus({preventScroll:true});},duration*.6);
   }
   function closeSurface(name,onClosed,forDrag=false) {
     const context=surfaces.get(name);if(!context||context.status==='closing')return;
@@ -1030,7 +1099,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
     state.folders=state.folders.filter(folder=>{if(folder.appIds.length||!previous.has(folder.id))return true;clearAppLayout(folder.id);return false;});
   }
   function openOrganizer(mode='bulk',selectedId=null,sourceFolder=null) {
-    closeAppContext();organizerRequest?.abort();if(folderId)closeFolder();if(surfaces.has('settings'))closeSettings();
+    closeAppContext();organizerRequest?.abort();if(folderId)closeFolder();if(widgetId)closeWidgetDetails();if(surfaces.has('settings'))closeSettings();
     organizerMode=mode;organizerFolderId=sourceFolder;organizerPlan=null;organizerBusy=false;selectedApps.clear();if(selectedId)selectedApps.add(selectedId);
     bulkDraft={action:'new',name:'常用 App',page:viewPages[currentPage].pageId,folder:state.folders[0]?.id||''};
     const scope=$('#organizerScope');scope.replaceChildren();[['all','全部桌面'],['current','当前桌面'],...(sourceFolder?[['folder','当前文件夹']]:[])].forEach(([value,label])=>{const option=el('option','',label);option.value=value;scope.append(option);});scope.value=sourceFolder?'folder':'all';
@@ -1130,7 +1199,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
       });pruneEmptiedFolders(previous);
     },`已整理为 ${groups.length} 组文件夹`);
   }
-  function openSettings(origin=null,tab='apps') {closeAppContext();if(folderId)closeFolder();settingsTab=tab;renderSettings();openSurface('settings',origin);}
+  function openSettings(origin=null,tab='apps') {closeAppContext();if(folderId)closeFolder();if(widgetId)closeWidgetDetails();settingsTab=tab;renderSettings();openSurface('settings',origin);}
   function closeSettings() {closeSurface('settings');}
   function updateSearchPreferences() { $('#searchTrigger>span:nth-child(2)').textContent=state.searchLabel;activeEngine=state.searchEngine; }
   function renderSettings() {
@@ -1208,14 +1277,14 @@ import {generateSyncKey,sameState} from './sync-model.js';
   function renderDataSettings(root) {
     settingsHeader(root,'布局与数据','所有改动默认保存在当前浏览器');const actions=el('div','data-actions');
     const exportButton=el('button','button-primary','导出 JSON 备份');exportButton.type='button';exportButton.addEventListener('click',()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=el('a');link.href=url;link.download='weboss-backup.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});actions.append(exportButton);
-    const importLabel=el('label','button-secondary','导入 JSON 备份');importLabel.style.cursor='pointer';const input=el('input');input.type='file';input.accept='.json,application/json';input.addEventListener('change',async()=>{if(!input.files?.[0])return;try{const data=JSON.parse(await input.files[0].text());const imported=importLegacy(data);state=normalize(imported);save();updateSearchPreferences();setWallpaper();renderPages();renderDock();renderSettings();loadWeather();toast('桌面配置已导入');}catch{toast('JSON 格式不正确');}});importLabel.append(input);actions.append(importLabel);root.append(actions);
+    const importLabel=el('label','button-secondary','导入 JSON / 旧快捷方式');importLabel.style.cursor='pointer';const input=el('input');input.type='file';input.accept='.json,application/json';input.setAttribute('aria-label','导入 JSON 或旧快捷方式');input.addEventListener('change',async()=>{if(!input.files?.[0])return;try{if(input.files[0].size>1000000)throw Error('JSON 文件超过 1 MB，请缩小后导入。');const data=JSON.parse(await input.files[0].text());const imported=importDesktop(data,state,defaults,{pageId:viewPages[currentPage].pageId});state=normalize(imported.state);save();updateSearchPreferences();setWallpaper();renderPages();renderDock();renderSettings();loadWeather();if(widgetId)renderWidgetDetails();const report=imported.report;toast(report.kind==='backup'?'桌面备份已恢复':`已添加 ${report.added} 个 · 去重 ${report.reused} 个${report.skipped?' · 跳过 '+report.skipped+' 个无效链接':''}${report.dockOverflow?' · '+report.dockOverflow+' 个置顶已加入收藏':''}`);}catch(error){toast(error instanceof SyntaxError?'JSON 格式不正确':error.message||'无法导入此文件');}});importLabel.append(input);actions.append(importLabel);root.append(actions);
     const reset=el('button','text-danger','恢复默认桌面');reset.type='button';reset.addEventListener('click',()=>{if(!confirm('确定恢复默认桌面？当前自定义布局会被覆盖。'))return;state=normalize(defaults);save();setWallpaper();renderPages();renderDock();renderSettings();loadWeather();updateSearchPreferences();toast('已恢复默认桌面');});root.append(reset);
-    root.append(el('p','settings-note','兼容导入原 browser-start-page-v2 导出的 shortcuts / widgets JSON。网站配置只存于本机浏览器，清除浏览器数据前请先导出备份。'));
+    root.append(el('p','settings-note','支持快捷方式数组、shortcuts / widgets 旧版导出和 Weboss 完整备份。旧快捷方式按 order 排序、按 URL 去重追加；pinned 加入 Dock，空图标自动获取。完整备份恢复桌面；已连接云同步时导入结果也会同步。'));
   }
   function downloadJSON(value,name) {
     const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'})),link=el('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
-  function syncBusy(){return !!(dragState||resizeState||dropSettling||$('#editorDialog').open||surfaces.has('organizer')||document.activeElement?.matches('#settingsContent input:not([readonly]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),#settingsContent textarea,#settingsContent select'));}
+  function syncBusy(){return !!(dragState||resizeState||dropSettling||$('#editorDialog').open||surfaces.has('organizer')||document.activeElement?.matches('#settingsContent input:not([readonly]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),#settingsContent textarea,#settingsContent select,#folderName,#widgetDetails input:not([type="checkbox"]),#widgetDetails textarea'));}
   function applySyncedState(raw) {
     const oldCity=JSON.stringify(state.city);state=normalize(raw);
     if(state.todoDate!==todayKey){state.todos.forEach(todo=>todo.done=false);state.todoDate=todayKey;}
@@ -1223,6 +1292,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
     pendingExternalState=false;organizationUndo=null;$('#undoOrganize').hidden=true;closeAppContext();
     if(folderId&&!folderById(folderId))closeFolder();updateSearchPreferences();setWallpaper();renderPages();renderDock();
     if(folderId)renderFolderContents();if(surfaces.has('search'))renderSearch();if($('#settingsDialog').open)renderSettings();if(JSON.stringify(state.city)!==oldCity)loadWeather();
+    if(widgetId)renderWidgetDetails();
   }
   function updateSyncStatus(status) {
     cloudStatus=status;const captions={off:'云同步',syncing:'正在同步',synced:'已同步',pending:'等待同步',offline:'离线 · 改动已保存',conflict:'同步冲突',error:'同步暂不可用',reconnect:'重新连接云桌面'};
@@ -1292,13 +1362,6 @@ import {generateSyncKey,sameState} from './sync-model.js';
       const buttons=el('div','sync-actions');buttons.append(action('恢复此备份',()=>cloudSync.restoreBackup(syncBackupId)),action('下载此备份',()=>{const item=cloudSync.backups.find(item=>item.id===syncBackupId);if(item)downloadJSON(item.state,'weboss-local-backup.json');}));backup.append(buttons);root.append(backup);
     }
   }
-  function importLegacy(data) {
-    if(Array.isArray(data.apps))return data;
-    if(!Array.isArray(data.shortcuts))throw Error('unknown format');
-    const base=clone(defaults);base.apps=data.shortcuts.filter(item=>validUrl(item.url)).map((item,index)=>({id:String(item.id||crypto.randomUUID()),name:String(item.name||'快捷方式'),url:validUrl(item.url),icon:String(item.icon||item.name?.slice(0,2)||'✦'),color:/^#[\da-f]{6}$/i.test(item.color)?item.color:'#6c9ca4',page:defaultPageIds[index%defaultPageIds.length]}));
-    base.widgets=[...defaults.widgets,...(Array.isArray(data.widgets)?data.widgets:[]).map(item=>({id:String(item.id||crypto.randomUUID()),type:item.type==='link'?'link':'note',page:'personal',size:'medium',title:String(item.title||'旧版便签'),content:String(item.content||'')}))];
-    base.apps.forEach(app=>app.iconMode='custom');base.dock=base.apps.slice(0,8).map(app=>app.id);return base;
-  }
   function field(label,value,type='text',options) {
     const wrap=el('label','field',label);let input;
     if(options){input=el('select');options.forEach(([value,text])=>{const option=el('option','',text);option.value=value;input.append(option);});input.value=value;}
@@ -1312,7 +1375,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
     const root=$('#editorFields');root.replaceChildren();const fields={};
     const add=(key,label,value,inputType='text',options)=>{const entry=field(label,value,inputType,options);entry.input.name=key;root.append(entry.wrap);fields[key]=entry.input;};
     if(type==='app'){
-      add('name','名称',item?.name||'');if(!item?.system)add('url','网站 URL',item?.url||'https://','url');
+      add('name','名称',item?.name||'');fields.name.maxLength=64;if(!item?.system)add('url','网站 URL',item?.url||'https://','url');
       add('iconMode','图标来源',item?.iconMode||'auto','select',[['auto','自动获取网站图标'],['custom','手动设置']]);
       add('icon','手动图标字符 / 图片 URL（自动模式下作为备用）',item?.icon||'✦');
       add('color','备用图标背景色',item?.color||'#6c9ca4','color');add('page','桌面页面',item?.page||viewPages[currentPage].pageId,'select',state.pages.map(page=>[page.id,page.name]));
@@ -1329,6 +1392,8 @@ import {generateSyncKey,sameState} from './sync-model.js';
     }else{
       add('type','Widget 类型',item?.type||'note','select',['clock','note','link','todo','calendar','quote','weather','progress','recent','favorites','watching','player','quick'].map(t=>[t,widgetLabel(t)]));
       add('title','标题',item?.title||'');add('content','内容 / 链接',item?.content||'','textarea');add('size','卡片尺寸',item?.size||'medium','select',[['small','小'],['medium','标准'],['wide','宽']]);add('page','桌面页面',item?.page||viewPages[currentPage].pageId,'select',state.pages.map(page=>[page.id,page.name]));
+      fields.content.maxLength=4000;const progress=normalizeProgress(item?.progress);add('progressValue','已完成数量',progress.value,'number');add('progressTotal','目标数量',progress.total,'number');add('progressUnit','计数单位',progress.unit);fields.progressValue.min='0';fields.progressTotal.min='1';fields.progressValue.max=fields.progressTotal.max='100000';fields.progressValue.step=fields.progressTotal.step='any';fields.progressUnit.maxLength=16;
+      const visibility=()=>['progressValue','progressTotal','progressUnit'].forEach(key=>fields[key].closest('label').hidden=fields.type.value!=='progress');fields.type.addEventListener('change',visibility);visibility();
     }
     editorContext.fields=fields;if(!$('#editorDialog').open)$('#editorDialog').showModal();fields.name?.focus();
   }
@@ -1338,7 +1403,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
     if(type==='app'){
       const existing=appById(id),url=existing?.system?'':validUrl(fields.url.value.trim());if(!existing?.system&&!url)return toast('请输入以 http 或 https 开头的网址');
       const name=fields.name.value.trim();if(!name)return toast('请输入 App 名称');
-      const app={id:id||crypto.randomUUID(),system:existing?.system,name:name.slice(0,32),url,icon:fields.icon.value.trim().slice(0,180)||'✦',iconMode:fields.iconMode.value,color:fields.color.value,page:fields.page.value};
+      const app={id:id||crypto.randomUUID(),system:existing?.system,name:name.slice(0,64),url,icon:fields.icon.value.trim().slice(0,180)||'✦',iconMode:fields.iconMode.value,color:fields.color.value,page:fields.page.value};
       if(existing&&existing.page!==app.page){unpinApp(id,app.page);removeFromFolders(id);}
       const index=state.apps.findIndex(item=>item.id===id);if(index>=0)state.apps[index]=app;else state.apps.push(app);
     }else if(type==='folder'){
@@ -1352,7 +1417,8 @@ import {generateSyncKey,sameState} from './sync-model.js';
     }else if(type==='search'){
       state.searchLabel=fields.name.value.trim().slice(0,80)||defaults.searchLabel;state.searchEngine=fields.engine.value;updateSearchPreferences();
     }else{
-      const widget={id:id||crypto.randomUUID(),type:fields.type.value,title:fields.title.value.trim().slice(0,40),content:fields.content.value.trim().slice(0,400),size:fields.size.value,page:fields.page.value};
+      const widget={id:id||crypto.randomUUID(),type:fields.type.value,title:fields.title.value.trim().slice(0,40),content:fields.content.value.trim().slice(0,4000),size:fields.size.value,page:fields.page.value};
+      if(widget.type==='progress')widget.progress=normalizeProgress({value:fields.progressValue.value,total:fields.progressTotal.value,unit:fields.progressUnit.value});
       if(widget.type==='link'&&!validUrl(widget.content))return toast('链接 Widget 需要有效的 http 或 https 地址');
       const index=state.widgets.findIndex(item=>item.id===id);if(index>=0)state.widgets[index]=widget;else state.widgets.push(widget);
     }
@@ -1386,7 +1452,7 @@ import {generateSyncKey,sameState} from './sync-model.js';
     music.frame=requestAnimationFrame(tickMusic);
   }
   function switchTrack(direction) {music.track=(music.track+direction+musicTracks.length)%musicTracks.length;music.elapsed=0;music.lastNote=-1;music.lastTick=performance.now();updatePlayer();}
-  function updatePlayer() {document.querySelectorAll('[data-type="player"] .widget-content').forEach(root=>{root.replaceChildren();renderPlayer(root);});}
+  function updatePlayer() {document.querySelectorAll('[data-type="player"] .widget-content').forEach(root=>{root.replaceChildren();renderPlayer(root);});document.querySelectorAll('.widget-playlist-item').forEach(node=>node.classList.toggle('active',Number(node.dataset.track)===music.track));}
 
   $('#searchTrigger').addEventListener('click',searchOpen);
   $('#searchClose').addEventListener('click',searchClose);
@@ -1415,13 +1481,19 @@ import {generateSyncKey,sameState} from './sync-model.js';
   $('#folderBackdrop').addEventListener('click',()=>closeFolder());
   $('#folderManage').addEventListener('click',()=>openEditor('folder',folderId));
   $('#folderBatch').addEventListener('click',()=>openOrganizer('bulk',null,folderId));
-  $('#folderName').addEventListener('change',()=>{const folder=folderById(folderId);if(!folder)return;folder.name=$('#folderName').value.trim().slice(0,32)||folder.name;refreshDesktop();});
-  $('#folderName').addEventListener('keydown',event=>{if(event.key==='Enter')event.target.blur();});
+  $('#folderRename').addEventListener('click',startFolderRename);
+  $('#folderName').addEventListener('blur',()=>finishFolderRename());
+  $('#folderName').addEventListener('keydown',event=>{if(['Enter','Escape'].includes(event.key)){event.preventDefault();event.stopPropagation();finishFolderRename(event.key==='Escape');$('#folderTitle').focus();}});
   $('#folderDialog').addEventListener('contextmenu',event=>{if(event.defaultPrevented)return;event.preventDefault();openItemContext('folder',folderId,event.clientX,event.clientY);});
+  $('#widgetClose').addEventListener('click',closeWidgetDetails);
+  $('#widgetBackdrop').addEventListener('click',closeWidgetDetails);
+  $('#widgetManage').addEventListener('click',()=>openEditor('widget',widgetId));
+  $('#widgetDialog').addEventListener('contextmenu',event=>{if(event.defaultPrevented)return;event.preventDefault();openItemContext('widget',widgetId,event.clientX,event.clientY);});
   $('#searchTrigger').addEventListener('contextmenu',event=>openDesktopContext(event,'search'));
   $('#dock').addEventListener('contextmenu',event=>{if(!event.defaultPrevented)openDesktopContext(event,'dock');});
   $('#desktopShell').addEventListener('dragstart',event=>event.preventDefault());
   $('#folderDialog').addEventListener('dragstart',event=>event.preventDefault());
+  $('#widgetDialog').addEventListener('dragstart',event=>event.preventDefault());
   $('#editorDialog').addEventListener('cancel',event=>{event.preventDefault();closeEditor();});
   $('#settingsTabs').addEventListener('click',event=>{const tab=event.target.closest('[data-tab]');if(!tab)return;settingsTab=tab.dataset.tab;renderSettings();if(settingsTab==='sync')checkSyncService();});
   $('#cloudSyncButton').addEventListener('click',event=>{openSettings(event.currentTarget,'sync');checkSyncService();});
@@ -1431,9 +1503,9 @@ import {generateSyncKey,sameState} from './sync-model.js';
   $('#editorForm').addEventListener('submit',event=>{event.preventDefault();saveEditor();});
   document.addEventListener('keydown',event=>{
     if(event.key==='Escape'&&(dragState?.active||resizeState)){event.preventDefault();if(dragState)stopTileDrag({pointerId:dragState.pointerId},true);if(resizeState)finishFolderResize({pointerId:resizeState.pointerId},true);return;}
-    if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'&&!$('#editorDialog').open){event.preventDefault();if($('#settingsDialog').open)closeSettings();if(folderId)closeFolder();searchOpen();return;}
+    if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'&&!$('#editorDialog').open){event.preventDefault();if($('#settingsDialog').open)closeSettings();if(folderId)closeFolder();if(widgetId)closeWidgetDetails();searchOpen();return;}
     if(event.key==='Escape'&&!$('#appContextMenu').hidden){closeAppContext();return;}
-    if(event.key==='Escape'&&!$('#editorDialog').open){if(surfaces.has('organizer'))closeOrganizer();else if(surfaces.has('search'))searchClose();else if(surfaces.has('settings'))closeSettings();else if(surfaces.has('folder'))closeFolder();else if(sizingFolderId){sizingFolderId=null;document.querySelectorAll('.folder-sizing').forEach(node=>node.classList.remove('folder-sizing'));}return;}
+    if(event.key==='Escape'&&!$('#editorDialog').open){if(surfaces.has('organizer'))closeOrganizer();else if(surfaces.has('search'))searchClose();else if(surfaces.has('settings'))closeSettings();else if(surfaces.has('widget'))closeWidgetDetails();else if(surfaces.has('folder'))closeFolder();else if(sizingFolderId){sizingFolderId=null;document.querySelectorAll('.folder-sizing').forEach(node=>node.classList.remove('folder-sizing'));}return;}
     if(event.key==='Tab'&&surfaces.size&&!$('#editorDialog').open){const context=[...surfaces.values()].filter(item=>item.status!=='closing').at(-1);if(context){const focusable=[...context.panel.querySelectorAll('button,input,a,select,textarea')].filter(node=>!node.disabled&&node.getClientRects().length);const first=focusable[0],last=focusable.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}}
     if(document.activeElement?.matches('input,textarea,select')||$('#editorDialog').open||surfaces.size)return;
     if(event.key==='ArrowRight')setPage(currentPage+1);if(event.key==='ArrowLeft')setPage(currentPage-1);

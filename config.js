@@ -1,6 +1,6 @@
 /* 默认桌面配置。结构保持为纯 JSON 数据，方便增删快捷方式。 */
 window.DEFAULT_DESKTOP_CONFIG = {
-  version: 6,
+  version: 7,
   folders: [],
   searchLabel: "搜索 App、网站或直接上网",
   searchEngine: "google",
@@ -80,7 +80,7 @@ window.DEFAULT_DESKTOP_CONFIG = {
     { id: "calendar", type: "calendar", page: "home", size: "medium" },
     { id: "quote", type: "quote", page: "home", size: "medium" },
     { id: "todo", type: "todo", page: "home", size: "medium" },
-    { id: "progress", type: "progress", page: "personal", size: "wide", title: "学习进度", content: "本周已完成 4 / 6 个小目标" },
+    { id: "progress", type: "progress", page: "personal", size: "wide", title: "学习进度", content: "本周学习目标", progress: { value: 4, total: 6, unit: "个目标" } },
     { id: "recent", type: "recent", page: "personal", size: "medium" },
     { id: "favorites", type: "favorites", page: "personal", size: "medium" },
     { id: "watching", type: "watching", page: "media", size: "wide" },
