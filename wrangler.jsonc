@@ -9,6 +9,12 @@
     "directory": "./dist",
     "binding": "ASSETS"
   },
+  // Keep dashboard-managed D1 bindings and Wrangler's default secret retention.
+  "unsafe": {
+    "metadata": {
+      "keep_bindings": ["d1", "secret_text", "secret_key"]
+    }
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1

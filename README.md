@@ -65,23 +65,17 @@ npm run dev:worker
 
 ### 新 D1 数据库
 
-当前版本仍使用浏览器 `localStorage`，还没有 D1 读写和云端同步接口。配置中暂不包含数据库 ID，页面可以直接部署。
+数据库通过 Cloudflare 控制台绑定，不需要把 Database ID 写入代码或 GitHub 仓库：
 
-准备接入数据库时，在 Cloudflare 的 Storage & databases → D1 SQL Database 中创建全新数据库，例如 `weboss-db`；复制它的 Database ID，然后在 `wrangler.jsonc` 顶层添加以下字段并重新部署：
+1. 在 Storage & databases → D1 SQL Database 中创建全新数据库，例如 `weboss-db`。如果已经创建，直接使用新库。
+2. 部署 Worker 后，进入 Workers & Pages → `weboss` → Bindings（绑定）→ Add binding（添加绑定）。
+3. 选择 D1 database，变量名称填写 **`DB`**，从列表中选择新数据库并保存。
 
-```json
-"d1_databases": [
-  {
-    "binding": "DB",
-    "database_name": "weboss-db",
-    "database_id": "填写新数据库的真实 UUID"
-  }
-]
-```
+`wrangler.jsonc` 使用 Wrangler 的 `unsafe.metadata.keep_bindings` 上传元数据配置，保留控制台已有的 D1 绑定，以及 Wrangler 默认保留的密钥类型。因此后续通过本仓库的 `npm run deploy` 部署时，不会因配置中没有数据库 ID 而移除现有 D1 绑定。首次部署尚未绑定数据库时也可以正常发布页面；该配置不会自动新建数据库。
 
-添加字段时保留正确的 JSON 逗号。后续 Worker 接口使用 `env.DB` 访问新库；表结构、身份验证和前端同步需要一并实现，绑定数据库本身不会改变当前本地保存行为。
+后续 Worker 接口使用 `env.DB` 访问所绑定的数据库。**当前版本仍使用浏览器 `localStorage`，还没有 D1 读写、表结构、身份验证和云端同步接口；绑定数据库本身不会启用云端保存。**
 
-部署配置参考 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/) 和 [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/)；数据库绑定参考 [D1 入门文档](https://developers.cloudflare.com/d1/get-started/)。
+部署配置参考 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/) 和 [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/)；控制台绑定参考 [D1 绑定文档](https://developers.cloudflare.com/d1/best-practices/remote-development/)，保留绑定的上传元数据参考 [Worker 版本上传 API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/create/)。
 
 ## 自定义
 
