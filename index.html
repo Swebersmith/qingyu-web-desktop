@@ -15,13 +15,12 @@
 
     <div class="desktop-shell" id="desktopShell">
       <header class="topbar">
-        <div class="top-context"><span id="topPageName">首页</span><span class="top-context-separator">·</span><span id="topDate"></span></div>
-        <div class="top-actions">
-          <button class="round-action cloud-sync-button" id="cloudSyncButton" type="button" title="云同步" aria-label="云同步" data-phase="off">☁</button>
+        <div class="top-context"><span id="topDate"></span></div>
+        <div class="top-actions" role="toolbar" aria-label="桌面工具">
+          <button class="top-tool cloud-sync-button" id="cloudSyncButton" type="button" title="云同步" aria-label="云同步" data-phase="off"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18h11a4 4 0 0 0 .4-8 6.5 6.5 0 0 0-12.6-1A4.5 4.5 0 0 0 7 18Z"/><path d="m9 12 3-3 3 3m-3-3v7"/></svg><span>同步</span></button>
           <button class="top-tool" id="undoOrganize" type="button" hidden>撤销整理</button>
-          <button class="top-tool" id="organizeButton" type="button" title="AI 自动整理" aria-label="AI 自动整理">✧ <span>自动整理</span></button>
-          <button class="round-action" id="batchButton" type="button" title="批量整理 App" aria-label="批量整理 App">☑</button>
-          <button class="round-action" id="editModeButton" type="button" title="整理桌面" aria-label="整理桌面">✦</button>
+          <button class="top-tool" id="organizeButton" type="button" title="AI / 批量整理 App" aria-label="整理 App"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/><path d="m17.5 2 1.2 3.3L22 6.5l-3.3 1.2-1.2 3.3-1.2-3.3L13 6.5l3.3-1.2Z"/></svg><span>整理</span></button>
+          <button class="top-tool" id="editModeButton" type="button" title="自由布置桌面" aria-label="布置桌面"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="12" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><path d="M14 20h7m-3.5-3.5v7"/></svg><span>布置</span></button>
         </div>
       </header>
 
@@ -89,6 +88,7 @@
       </div>
     </dialog>
 
+    <div id="deletePopover" class="delete-popover" role="alertdialog" aria-labelledby="deleteTitle" aria-describedby="deleteDescription" hidden></div>
     <div class="window-overlay" id="widgetOverlay" aria-hidden="true"><div class="window-backdrop" id="widgetBackdrop"></div></div>
     <dialog class="widget-dialog morph-surface" id="widgetDialog" aria-label="小组件详情">
       <div class="widget-frame">

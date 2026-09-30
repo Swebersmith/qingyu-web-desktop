@@ -74,10 +74,10 @@ export function folderMetrics(width, height, compact = false) {
   const padding = 10, header = 26, gap = 6;
   const usableWidth = Math.max(24,width-padding*2), usableHeight = Math.max(24,height-padding*2-header);
   const columns = Math.max(1,Math.floor((usableWidth+gap)/58));
-  const rows = Math.max(1,Math.round((usableHeight+gap)/64));
+  const rows = Math.max(1,Math.round((usableHeight+gap)/68));
   const cellWidth = (usableWidth-gap*(columns-1))/columns;
   const cellHeight = (usableHeight-gap*(rows-1))/rows;
-  const labels = cellHeight >= 51;
-  const icon = Math.max(18,Math.floor(Math.min(52,cellWidth-4,cellHeight-(labels?19:4))));
+  const labels = cellHeight >= 55;
+  const icon = Math.max(18,Math.floor(Math.min(52,cellWidth-4,cellHeight-(labels?23:4))));
   return {columns,rows,capacity:columns*rows,icon,labels};
 }

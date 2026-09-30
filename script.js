@@ -4,6 +4,7 @@ import {CloudSync,SYNC_STORAGE_KEY} from './sync-client.js';
 import {generateSyncKey,sameState} from './sync-model.js';
 import {importDesktop} from './desktop-import.js';
 import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-model.js';
+import {IconStore} from './icon-client.js';
 
 (() => {
   'use strict';
@@ -12,6 +13,8 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
   const defaults = window.DEFAULT_DESKTOP_CONFIG;
   const $ = (selector, root = document) => root.querySelector(selector);
   const clone = value => JSON.parse(JSON.stringify(value));
+  const icons=new IconStore(),folderAppNodes=new Map(),iconPainters=new WeakMap();
+  let deleteConfirmation=null;
   const newDefaultAppIds = new Set(['x','telegram','baidu','douban','maps','taobao','mooc','coursera','arxiv','wikipedia','deepl','keep','qqmusic','twitch','doubanmovie','doubanmusic','bilibangumi','epic','stackoverflow','mdn','codepen','vercel','unsplash','tinypng']);
   const quotes = [
     '生活嘛，就是要开心一点。',
@@ -162,49 +165,35 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
     state.dock=state.dock.filter(appId=>appId!==id);const app=appById(id);if(app){app.page=state.pages.some(item=>item.id===page)?page:state.pages[0].id;clearAppLayout(id);}
   }
   function itemById(type,id) { return type==='app'?appById(id):type==='folder'?folderById(id):state.widgets.find(widget=>widget.id===id); }
-  function refreshDesktop() { save();renderPages();renderDock();if(folderId)renderFolderContents();if(widgetId)renderWidgetDetails();if($('#settingsDialog').open)renderSettings(); }
+  function refreshDesktop() { save();renderPages();renderDock();if(folderId){if(folderById(folderId))renderFolderContents();else closeFolder();}if(widgetId)renderWidgetDetails();if($('#settingsDialog').open)renderSettings(); }
   function isLightColor(hex) {
     const rgb = [1,3,5].map(i => parseInt(hex.slice(i,i+2),16));
     return rgb[0]*.299 + rgb[1]*.587 + rgb[2]*.114 > 185;
   }
   function appIcon(app, tiny = false, preview = false) {
     const icon = el('span', tiny ? 'tiny-app-icon' : 'app-icon');
+    icon.dataset.appId=app.id;
     icon.style.setProperty('--app-color', app.color);
     if (tiny) { icon.style.background = app.color; icon.style.color = isLightColor(app.color) ? '#38545a' : '#fff'; }
     else if (isLightColor(app.color)) icon.classList.add('light');
     const fallbackText=/^https?:\/\//.test(app.icon) ? app.name.slice(0,1) : app.icon;
     const fallback=el('span','icon-fallback',fallbackText || app.name.slice(0,1) || '✦');icon.append(fallback);
-    if(preview){const source=document.querySelector(`.desktop-canvas [data-id="${CSS.escape(app.id)}"] .app-icon,#dock [data-id="${CSS.escape(app.id)}"] .app-icon`);if(source?.classList.contains('has-favicon')){const snapshot=source.cloneNode(true);snapshot.classList.remove('app-icon','tiny-app-icon');snapshot.classList.add(tiny?'tiny-app-icon':'app-icon');return snapshot;}return icon;}
-    const manual=app.iconMode==='custom' || (!app.iconMode && /^https?:\/\//.test(app.icon));
-    const site=app.system?null:new URL(app.url),host=site?.hostname;
-    const sources=app.system?[]:manual ? [validUrl(app.icon)].filter(Boolean) : [
-      `${site.origin}/favicon.ico?wd=1`,
-      `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=128`,
-      `https://icons.duckduckgo.com/ip3/${encodeURIComponent(host)}.ico`
-    ];
-    if(sources.length){
-      icon.dataset.iconMode=manual?'custom':'auto';icon.dataset.favicon=sources[0];
-      const image=new Image();image.alt='';image.draggable=false;image.decoding='async';image.referrerPolicy='no-referrer';
-      let sourceIndex=0,timer=0;
-      const advance=()=>{clearTimeout(timer);sourceIndex++;if(sourceIndex<sources.length)trySource();};
-      const scheduleCheck=()=>{
-        timer=setTimeout(()=>{
-          if(!icon.isConnected)return;
-          if(!image.complete)advance();
-        },1800);
-      };
-      const trySource=()=>{image.src=sources[sourceIndex];scheduleCheck();};
-      image.addEventListener('load',()=>{clearTimeout(timer);if(image.naturalWidth>0&&icon.isConnected){icon.append(image);icon.classList.add('has-favicon');if(!manual){icon.classList.add('auto-favicon');if(tiny)icon.style.background='rgba(255,255,255,.92)';}}});
-      image.addEventListener('error',advance);
-      requestAnimationFrame(()=>{
-        if(!icon.isConnected)return;
-        if(tiny||!('IntersectionObserver' in window)){trySource();return;}
-        const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){observer.disconnect();trySource();}},{rootMargin:'180px'});
-        observer.observe(icon);
-      });
-    }
+    if(preview){const source=document.querySelector(`[data-id="${CSS.escape(app.id)}"] .has-favicon`);if(source){const snapshot=source.cloneNode(true);snapshot.classList.remove('app-icon','tiny-app-icon');snapshot.classList.add(tiny?'tiny-app-icon':'app-icon');return snapshot;}}
+    const manual=app.iconMode==='custom';if(app.system||manual&&!validUrl(app.icon))return icon;
+    const paint=value=>{if(!value||icon.dataset.favicon===value.src)return;const image=new Image();image.alt='';image.draggable=false;image.decoding='async';image.referrerPolicy='no-referrer';image.src=value.src;icon.querySelector('img')?.remove();icon.append(image);icon.classList.add('has-favicon');icon.classList.toggle('auto-favicon',value.source==='website');icon.classList.toggle('generated-icon',value.source==='ai'||value.source==='local');icon.dataset.iconMode=value.source==='custom'?'custom':'auto';icon.dataset.iconSource=value.source;icon.dataset.favicon=value.src;icon.title=value.source==='ai'?'AI 生成的备用图标':value.source==='local'?'本地备用图标':'';if(tiny&&value.source==='website')icon.style.background='rgba(255,255,255,.92)';};
+    iconPainters.set(icon,paint);paint(icons.peek(app));
+    if(!preview)requestAnimationFrame(()=>{if(!icon.isConnected)return;let retries=0;const resolve=()=>icons.resolve(app).then(value=>{if(!icon.isConnected)return;paint(value);if(value.retry&&retries++<6)setTimeout(()=>{if(icon.isConnected)resolve();},value.retry+1000);});if(tiny||!('IntersectionObserver' in window))resolve();else{const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){observer.disconnect();resolve();}},{rootMargin:'120px'});observer.observe(icon);}});
     return icon;
   }
+  async function refreshAppIcon(app,forceAI=false){app.iconMode='auto';save();toast(forceAI?'正在生成备用图标…':'正在重新获取图标…');const value=await icons.resolve(app,{forceAI,refresh:true});document.querySelectorAll(`[data-app-id="${CSS.escape(app.id)}"]`).forEach(node=>iconPainters.get(node)?.(value));document.querySelectorAll('.desktop-canvas>[data-kind],.folder-app').forEach(node=>{const item=itemById(node.dataset.kind||'app',node.dataset.id);if(item)tileSignatures.set(node,tileSignature({kind:node.dataset.kind||'app',data:item}));});toast(value.source==='ai'?'AI 备用图标已生成':forceAI?'AI 暂不可用，已使用本地备用图标':'图标已更新');}
+  function closeDeleteConfirmation(){if(!deleteConfirmation)return;const anchor=deleteConfirmation.anchor;$('#deletePopover').hidden=true;deleteConfirmation=null;if(anchor?.isConnected)(anchor.matches('a,button')?anchor:anchor.querySelector('a,button'))?.focus({preventScroll:true});}
+  function showDeleteConfirmation(title,description,anchor,action,item=null){
+    closeDeleteConfirmation();const popover=$('#deletePopover'),container=$('#editorDialog').open?$('#editorDialog'):document.body;container.append(popover);popover.replaceChildren();const head=el('div','delete-popover-head');if(item?.url)head.append(appIcon(item,true));const heading=el('strong','',title);heading.id='deleteTitle';head.append(heading);const detail=el('p','',description);detail.id='deleteDescription';const actions=el('div','delete-popover-actions'),cancel=el('button','button-secondary','取消'),remove=el('button','button-danger','确认删除');cancel.type=remove.type='button';cancel.addEventListener('click',closeDeleteConfirmation);remove.addEventListener('click',()=>{closeDeleteConfirmation();action();});actions.append(cancel,remove);popover.append(head,detail,actions);popover.hidden=false;
+    const rect=anchor?.getBoundingClientRect()||{left:innerWidth/2,right:innerWidth/2,top:innerHeight/2,bottom:innerHeight/2,width:0,height:0},width=Math.min(292,innerWidth-24);popover.style.width=`${width}px`;const height=popover.offsetHeight;
+    const beside=innerWidth-rect.right>width+20||rect.left>width+20;const left=beside?(innerWidth-rect.right>width+20?rect.right+12:rect.left-width-12):Math.max(12,Math.min(rect.left+rect.width/2-width/2,innerWidth-width-12)),top=beside?rect.top+rect.height/2-height/2:rect.bottom+height+20<innerHeight?rect.bottom+12:rect.top-height-12;
+    Object.assign(popover.style,{width:`${width}px`,left:`${Math.max(12,Math.min(left,innerWidth-width-12))}px`,top:`${Math.max(12,Math.min(top,innerHeight-height-12))}px`});deleteConfirmation={anchor};cancel.focus({preventScroll:true});
+  }
+  function confirmItemDelete(type,id,anchor=null){const item=itemById(type,id);if(!item||item.system)return;anchor||=[...document.querySelectorAll(`#folderGrid>[data-id="${CSS.escape(id)}"],#dock>[data-id="${CSS.escape(id)}"],.desktop-canvas>[data-id="${CSS.escape(id)}"],.folder-tile [data-id="${CSS.escape(id)}"]`)].find(node=>{const rect=node.getBoundingClientRect();return rect.width>0&&rect.height>0&&rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight&&getComputedStyle(node).visibility!=='hidden';})||$('#editorDelete');showDeleteConfirmation(`删除“${item.name||item.title||widgetLabel(item.type)}”？`,'确认后会从当前桌面移除。',anchor,()=>{if(type==='app'){state.apps=state.apps.filter(app=>app.id!==id);state.dock=state.dock.filter(value=>value!==id);state.history=state.history.filter(value=>value!==id);state.favoriteIds=state.favoriteIds.filter(value=>value!==id);removeFromFolders(id);folderAppNodes.delete(id);}else state.widgets=state.widgets.filter(widget=>widget.id!==id);for(const mode of ['desktop','tablet','mobile'])delete state.layout[mode][id];if(editorContext?.id===id)closeEditor();refreshDesktop();toast('已删除');},type==='app'?item:null);}
   function openApp(app,origin) {
     if (!app) return;
     if(app.system==='settings'){openSettings(origin);return;}
@@ -243,6 +232,8 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
       refreshDesktop();toast(inDock?'已放回当前桌面':'已加入 Dock');
     });
     if(type==='app'&&!item.system){
+      action('重新获取图标','↻',()=>refreshAppIcon(item));
+      action('生成 AI 备用图标','✧',()=>refreshAppIcon(item,true));
       action(state.favoriteIds.includes(id)?'取消收藏':'加入收藏','♡',()=>{state.favoriteIds=state.favoriteIds.includes(id)?state.favoriteIds.filter(value=>value!==id):[...state.favoriteIds,id];save();updateWidgetCards('favorites');if(itemById('widget',widgetId)?.type==='favorites')renderWidgetDetails();});
       action('多选 / 批量整理','☑',()=>openOrganizer('bulk',id));
       const folder=folderOfApp(id);
@@ -272,12 +263,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
         refreshDesktop();toast(`已移动到${page.name}`);
       });pageChoices.append(button);
     });group.append(pageChoices);menu.append(group);
-    if(type!=='folder'&&!item.system)action(type==='app'?'删除快捷方式':'删除 Widget','×',()=>{if(!confirm(`删除“${item.name||item.title||widgetLabel(item.type)}”？`))return;
-      if(type==='app'){state.apps=state.apps.filter(app=>app.id!==id);state.dock=state.dock.filter(appId=>appId!==id);state.history=state.history.filter(appId=>appId!==id);removeFromFolders(id);}
-      else state.widgets=state.widgets.filter(widget=>widget.id!==id);
-      for(const mode of ['desktop','tablet','mobile'])delete state.layout[mode][id];
-      refreshDesktop();toast('已删除');
-    },true);
+    if(type!=='folder'&&!item.system)action(type==='app'?'删除快捷方式':'删除 Widget','×',()=>confirmItemDelete(type,id),true);
     positionContext(x,y);
   }
   function positionContext(x,y) {
@@ -340,7 +326,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
   }
   function availableRows(mode) {
     const viewport=$('#desktopViewport');
-    const {row,gap}=gridMetric(mode), heading=mode==='mobile'?34:39;
+    const {row,gap}=gridMetric(mode), heading=12;
     return Math.max(3,Math.floor((viewport.clientHeight-heading+gap-4)/(row+gap)));
   }
   function tileSize(item, mode) {
@@ -402,11 +388,8 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
     viewPages.push({pageId:page.id,name:page.name,segment,screenIndex,total,temporary});
     const section=el('section',`desktop-page${temporary?' draft-page':''}`);section.dataset.page=page.id;section.dataset.segment=String(segment);
     section.setAttribute('aria-label',total>1?`${page.name}，第 ${screenIndex+1} 屏`:page.name);
-    const inner=el('div','page-inner'),heading=el('div','desktop-heading');
-    const appCount=items.filter(item=>item.kind==='app').length;
-    heading.append(el('span','desktop-heading-name',total>1?`${page.name} · ${screenIndex+1}/${total}`:page.name),
-      el('span','desktop-heading-hint',temporary?'松手放到新桌面':appCount?`${appCount} 个 App · 右键管理`:items.length?`${items.length} 个组件 · 左右切换`:'拖入 App 或小组件，开始布置桌面'));
-    inner.append(heading);
+    const inner=el('div','page-inner');
+    if(temporary)inner.append(el('div','draft-page-hint','松手放到新桌面'));
     const canvas=el('div','desktop-canvas');canvas.dataset.page=page.id;canvas.dataset.segment=String(segment);canvas.dataset.mode=mode;
     items.forEach(item=>{
       const node=item.kind==='app'?renderApp(item.data):item.kind==='folder'?renderFolderTile(item.data):renderWidget(item.data),pos=positions.get(item.id);
@@ -432,7 +415,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
     const {page,...data}=item.data;
     if(item.kind==='folder'){
       const {sizes,...folder}=data,size=tileSize(item,layoutMode());
-      return JSON.stringify([folder,size.w===1&&size.h===1,item.data.appIds.map(id=>{const {page,...app}=appById(id)||{};return app;})]);
+      const {appIds,...frame}=folder;return JSON.stringify([frame,size.w===1&&size.h===1]);
     }
     const dependencies=item.kind!=='widget'?null:item.data.type==='todo'?state.todos:item.data.type==='weather'?[state.city,weather]:item.data.type==='watching'?state.watching:['recent','favorites','quick'].includes(item.data.type)?[item.data.type==='recent'?state.history:item.data.type==='favorites'?state.favoriteIds:null,state.apps.map(({page,...app})=>app)]:null;
     return JSON.stringify([data,dependencies]);
@@ -456,9 +439,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
         else viewPages.push({pageId:page.id,name:page.name,segment,screenIndex,total:segments.length,temporary:false});
         retainedSections.add(section);section.classList.remove('draft-page');
         section.setAttribute('aria-label',segments.length>1?`${page.name}，第 ${screenIndex+1} 屏`:page.name);
-        const name=segments.length>1?`${page.name} · ${screenIndex+1}/${segments.length}`:page.name,appCount=pageItemsInSegment.filter(item=>item.kind==='app').length;
-        $('.desktop-heading-name',section).textContent=name;
-        $('.desktop-heading-hint',section).textContent=appCount?`${appCount} 个 App · 右键管理`:pageItemsInSegment.length?`${pageItemsInSegment.length} 个组件 · 左右切换`:'拖入 App 或小组件，开始布置桌面';
+        $('.draft-page-hint',section)?.remove();
         const canvas=$('.desktop-canvas',section);canvas.dataset.mode=mode;
         pageItemsInSegment.forEach((item,index)=>{
           const signature=tileSignature(item),pos=positions.get(item.id);let node=tiles.get(`${item.kind}:${item.id}`);
@@ -491,7 +472,6 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
     currentPage = Math.max(0,Math.min(viewPages.length-1,index));closeAppContext();
     const track = $('#pageTrack');
     const view=viewPages[currentPage];
-    $('#topPageName').textContent = view.name;
     if (!animate) { track.classList.add('dragging'); requestAnimationFrame(() => track.classList.remove('dragging')); }
     track.style.transform = `translate3d(${-currentPage*100}%,0,0)`;
     [...$('#pageDots').children].forEach((dot,i) => { dot.classList.toggle('active',i===currentPage); dot.setAttribute('aria-current',String(i===currentPage)); });
@@ -561,12 +541,12 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
   function fitFolderTile(tile) {
     const folder=folderById(tile.dataset.id);if(!folder||!tile.isConnected)return;
     const compact=tile.classList.contains('compact'),metrics=folderMetrics(tile.clientWidth,tile.clientHeight,compact);
-    const signature=JSON.stringify([metrics,folder.appIds]);if(tile.dataset.fit===signature)return;tile.dataset.fit=signature;
-    const grid=$('.folder-tile-grid',tile),existing=new Map([...grid.querySelectorAll('.folder-app[data-id]')].map(node=>[node.dataset.id,node])),next=[];
+    const signature=JSON.stringify([metrics,folder.appIds,folder.appIds.map(appById)]);if(tile.dataset.fit===signature)return;tile.dataset.fit=signature;$('.folder-tile-head span',tile).textContent=`${folder.appIds.length}  ↗`;
+    const grid=$('.folder-tile-grid',tile),existing=new Map([...grid.querySelectorAll('.folder-app[data-id]')].map(node=>[node.dataset.id,node])),mini=new Map([...grid.querySelectorAll(':scope>.tiny-app-icon')].map(node=>[node.dataset.appId,node])),next=[];
     tile.style.setProperty('--folder-cols',metrics.columns);tile.style.setProperty('--folder-rows',metrics.rows);tile.style.setProperty('--folder-icon',`${metrics.icon}px`);tile.classList.toggle('folder-no-labels',!compact&&!metrics.labels);
     const overflow=!compact&&folder.appIds.length>metrics.capacity,visible=overflow?metrics.capacity-1:metrics.capacity;
     folder.appIds.slice(0,visible).forEach(id=>{const app=appById(id);if(!app)return;
-      if(compact)next.push(appIcon(app,true,tile.dataset.preview==='true'));else{const signature=tileSignature({kind:'app',data:app});let node=existing.get(id);if(!node||tileSignatures.get(node)!==signature){node=renderApp(app,tile.dataset.preview==='true');tileSignatures.set(node,signature);}node.classList.add('folder-app');node.dataset.folder=folder.id;next.push(node);}
+      if(compact){let node=mini.get(id);const signature=JSON.stringify(app);if(!node||node.dataset.visualSignature!==signature){node=appIcon(app,true,tile.dataset.preview==='true');node.dataset.visualSignature=signature;}next.push(node);}else{const signature=tileSignature({kind:'app',data:app});let node=existing.get(id);if(!node||tileSignatures.get(node)!==signature){node=renderApp(app,tile.dataset.preview==='true');tileSignatures.set(node,signature);}node.classList.add('folder-app');node.dataset.folder=folder.id;next.push(node);}
     });
     if(overflow){const moreSignature=JSON.stringify([folder.appIds.slice(visible),folder.name]);let more=$('.folder-more',grid);
       if(!more||more.dataset.members!==moreSignature){more=el('button','folder-more');more.dataset.members=moreSignature;more.type='button';more.setAttribute('aria-label',`打开 ${folder.name}，还有 ${folder.appIds.length-visible} 个 App`);
@@ -619,9 +599,9 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
     const folder=folderById(folderId);if(!folder)return;
     $('#folderTitle').textContent=folder.name;if($('#folderName').hidden)$('#folderName').value=folder.name;$('#folderDialog').dataset.id=folder.id;
     const columns=innerWidth<=700?3:4,rows=Math.max(1,Math.min(3,Math.floor((surfaceTarget('folder').height-210+18)/86))),count=columns*rows,total=Math.max(1,Math.ceil(folder.appIds.length/count));folderPage=Math.min(folderPage,total-1);
-    const grid=$('#folderGrid');grid.style.gridTemplateRows=`repeat(${rows},minmax(0,1fr))`;grid.replaceChildren();folder.appIds.slice(folderPage*count,(folderPage+1)*count).forEach(id=>{
-      const app=appById(id);if(!app)return;const node=renderApp(app);node.classList.add('folder-app');node.dataset.folder=folder.id;grid.append(node);
-    });
+    const grid=$('#folderGrid'),next=[];grid.style.gridTemplateRows=`repeat(${rows},minmax(0,1fr))`;folder.appIds.slice(folderPage*count,(folderPage+1)*count).forEach(id=>{
+      const app=appById(id);if(!app)return;const {page,...visual}=app,signature=JSON.stringify(visual);let cached=folderAppNodes.get(id);if(!cached||cached.signature!==signature){cached={signature,node:renderApp(app)};folderAppNodes.set(id,cached);}const node=cached.node;node.classList.add('folder-app');node.dataset.folder=folder.id;next.push(node);
+    });for(const node of [...grid.children])if(!next.includes(node))node.remove();next.forEach((node,index)=>{if(grid.children[index]!==node)grid.insertBefore(node,grid.children[index]||null);});for(const id of folderAppNodes.keys())if(!appById(id))folderAppNodes.delete(id);
     if(!folder.appIds.length){const button=el('button','folder-empty-add','+ 添加 App');button.type='button';button.addEventListener('click',()=>openEditor('folder',folder.id));grid.append(button);}
     const pages=$('#folderPagination');pages.replaceChildren();for(let index=0;index<total;index++){const button=el('button',index===folderPage?'active':'');button.type='button';button.setAttribute('aria-label',`文件夹第 ${index+1} 页`);button.addEventListener('click',()=>{folderPage=index;renderFolderContents();});pages.append(button);}
   }
@@ -805,6 +785,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
     if(resizing)requestAnimationFrame(()=>{if(drag.previewNode)fitFolderTile(drag.previewNode);});
   }
   function insideRect(event,rect,padding=0) { return event.clientX>=rect.left-padding&&event.clientX<=rect.right+padding&&event.clientY>=rect.top-padding&&event.clientY<=rect.bottom+padding; }
+  function folderLandingRect(tile,id){const folder=folderById(tile.dataset.id),grid=$('.folder-tile-grid',tile),bounds=grid.getBoundingClientRect(),compact=tile.classList.contains('compact'),metrics=folderMetrics(tile.clientWidth,tile.clientHeight,compact);let index=folder.appIds.indexOf(id);if(index<0)index=folder.appIds.length;index=Math.min(index,metrics.capacity-1);const gap=compact?3:6,cellWidth=(bounds.width-gap*(metrics.columns-1))/metrics.columns,cellHeight=(bounds.height-gap*(metrics.rows-1))/metrics.rows,side=metrics.icon;return {left:bounds.left+(index%metrics.columns)*(cellWidth+gap)+(cellWidth-side)/2,top:bounds.top+Math.floor(index/metrics.columns)*(cellHeight+gap)+(cellHeight-side-(metrics.labels?16:0))/2,width:side,height:side};}
   function updateDragPreview(drag,event) {
     const dock=$('#dock'),dockRect=dock.getBoundingClientRect();
     if(drag.type==='app'&&insideRect(event,dockRect,12)){
@@ -845,7 +826,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
     const nodes=[...canvas.children].filter(node=>node.matches('.app-shortcut,.widget-card,.folder-tile')&&node.dataset.id!==drag.id);
     const folderTarget=drag.type==='app'&&!item.data.system?nodes.find(node=>node.dataset.kind==='folder'&&insideRect(event,node.getBoundingClientRect())):null;
     document.querySelectorAll('.folder-drop-ready,.folder-group-ready,.folder-slot-target').forEach(node=>node.classList.remove('folder-drop-ready','folder-group-ready','folder-slot-target'));
-    if(folderTarget){clearDragPreview(drag);resetGroupCandidate(drag);folderTarget.classList.add('folder-drop-ready');drag.previewTarget={action:'folder-add',folder:folderTarget.dataset.id,rect:folderTarget.getBoundingClientRect()};return;}
+    if(folderTarget){clearDragPreview(drag);resetGroupCandidate(drag);folderTarget.classList.add('folder-drop-ready');const rect=folderLandingRect(folderTarget,drag.id);drawDropPreview(drag,rect,{action:'folder-add',folder:folderTarget.dataset.id});drag.previewNode.classList.add('folder-insert-preview');return;}
     const overlaps=(x,y,node)=>{const pos=tilePosition(node),localY=pos.y%rowsPerPage;return x<pos.x+pos.w&&x+w>pos.x&&y<localY+pos.h&&y+h>localY;};
     let x=wantedX,y=wantedY,collisions=nodes.filter(node=>overlaps(x,y,node)),swap=null;
     if(collisions.length===1){const pos=tilePosition(collisions[0]);
@@ -854,7 +835,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
     const groupApp=drag.type==='app'&&!item.data.system&&collisions.length===1&&collisions[0].dataset.kind==='app'&&!appById(collisions[0].dataset.id).system?collisions[0]:null;
     if(groupApp){
       if(drag.groupCandidate!==groupApp.dataset.id){resetGroupCandidate(drag);drag.groupCandidate=groupApp.dataset.id;drag.groupTimer=setTimeout(()=>{if(dragState===drag){drag.groupReady=true;updateDragPreview(drag,{clientX:drag.lastX,clientY:drag.lastY});}},520);}
-      if(drag.groupReady){clearDragPreview(drag);groupApp.classList.add('folder-group-ready');drag.previewTarget={action:'folder-create',with:groupApp.dataset.id,pageId:view.pageId,position:tilePosition(groupApp),rect:groupApp.getBoundingClientRect()};return;}
+      if(drag.groupReady){clearDragPreview(drag);groupApp.classList.add('folder-group-ready');const icon=$('.app-icon',groupApp).getBoundingClientRect(),side=12;drag.previewTarget={action:'folder-create',with:groupApp.dataset.id,pageId:view.pageId,position:tilePosition(groupApp),rect:{left:icon.left+icon.width/2-side/2,top:icon.top+3,width:side,height:side}};return;}
     }else resetGroupCandidate(drag);
     if(collisions.length&&!swap){
       const choices=[];
@@ -928,8 +909,9 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
       if(other){other.page=drag.sourcePage;if(target.swap.dataset.kind==='folder')other.appIds.forEach(id=>appById(id).page=drag.sourcePage);state.layout[mode][other.id]={page:drag.sourcePage,x:drag.sourcePos.x,y:drag.sourcePos.y,priority:priority-1};}
     }
     save();
-    drag.ghost.animate([{left:drag.ghost.style.left,top:drag.ghost.style.top,opacity:1},{left:`${target.rect.left}px`,top:`${target.rect.top}px`,opacity:.45}],{duration:220,easing:'cubic-bezier(.2,.7,.2,1)',fill:'forwards'});
-    setTimeout(()=>{settle();renderPages();renderDock();if(folderId)renderFolderContents();if(createdFolder)openFolder(createdFolder.id);toast(message);},230);
+    const intoFolder=target.action==='folder-add'||target.action==='folder-create',duration=intoFolder?320:220;
+    let transfer=null;if(intoFolder){const source=$('.app-icon',drag.ghost)||drag.ghost,rect=source.getBoundingClientRect();transfer=source.cloneNode(true);transfer.classList.add('folder-transfer');document.body.append(transfer);Object.assign(transfer.style,geometry(rect,parseFloat(getComputedStyle(source).borderRadius)||18));drag.ghost.style.opacity='0';transfer.animate([geometry(rect,18),{...geometry(target.rect,Math.max(4,target.rect.width*.28)),opacity:.3}],{duration,easing:'cubic-bezier(.22,.75,.2,1)',fill:'forwards'});}else drag.ghost.animate([{left:drag.ghost.style.left,top:drag.ghost.style.top,opacity:1},{left:`${target.rect.left}px`,top:`${target.rect.top}px`,opacity:.45}],{duration,easing:'cubic-bezier(.2,.7,.2,1)',fill:'forwards'});
+    setTimeout(()=>{transfer?.remove();settle();renderPages();renderDock();if(folderId)renderFolderContents();if(createdFolder)openFolder(createdFolder.id);if(intoFolder)requestAnimationFrame(()=>{const tile=document.querySelector(`.desktop-canvas>.folder-tile[data-id="${CSS.escape(target.folder||createdFolder.id)}"]`);tile?.animate([{transform:'scale(1)'},{transform:'scale(1.035)',offset:.45},{transform:'scale(1)'}],{duration:260,easing:'ease-out'});const icon=tile?.querySelector(`[data-app-id="${CSS.escape(drag.id)}"]`);icon?.animate([{opacity:.4,transform:'scale(.75)'},{opacity:1,transform:'scale(1)'}],{duration:240,easing:'ease-out'});});toast(message);},duration+10);
   }
   function startFolderResize(event,node,folder,axis='both') {
     if(event.button!==0||dragState||resizeState||dropSettling)return;event.preventDefault();event.stopPropagation();
@@ -1061,11 +1043,12 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
       const row=el('button',`search-result${result.type==='history'?' search-history':''}${index===selectedSearch?' selected':''}`);row.type='button';
       if(result.type==='app') {row.append(appIcon(result.app,true));const copy=el('span');copy.append(el('strong','',result.app.name),el('small','',result.app.system?'Weboss 桌面设置':result.app.url.replace(/^https?:\/\//,'')));row.append(copy);}
       else {row.append(el('span','tiny-app-icon',result.type==='history'?'↺':'⌕'));const copy=el('span');copy.append(el('strong','',result.type==='history'?result.text:`用 ${engines.find(e=>e.id===activeEngine).name} 搜索“${result.text}”`),el('small','',result.type==='history'?'搜索历史':'按 Enter 搜索网页'));row.append(copy);}
-      row.append(el('span','result-arrow','↗'));row.addEventListener('click',()=>runResult(result));root.append(row);
+      if(result.type==='web')$('strong',row).dataset.webSearch='';row.append(el('span','result-arrow','↗'));row.addEventListener('click',()=>runResult(result));root.append(row);
     });
     if(!query&&!state.searchHistory.length){heading('最近搜索');root.append(el('p','search-empty','搜索过的关键词会显示在这里'));}
-    const choices=$('#engineChoices');choices.replaceChildren();engines.forEach(engine=>{const button=el('button',`engine-choice${engine.id===activeEngine?' active':''}`,engine.name);button.type='button';button.addEventListener('click',()=>{activeEngine=engine.id;state.searchEngine=engine.id;save();renderSearch();});choices.append(button);});
+    const choices=$('#engineChoices');if(!choices.children.length)engines.forEach(engine=>{const button=el('button','engine-choice',engine.name);button.type='button';button.dataset.engine=engine.id;button.addEventListener('click',()=>{activeEngine=engine.id;state.searchEngine=engine.id;save();updateEngineChoices();const web=$('#searchResults [data-web-search]');if(web)web.textContent=`用 ${engine.name} 搜索“${$('#searchInput').value.trim()}”`;});choices.append(button);});updateEngineChoices();
   }
+  function updateEngineChoices(){document.querySelectorAll('#engineChoices button').forEach(button=>{const active=button.dataset.engine===activeEngine;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));});}
   function runResult(result) {
     if(result.type==='app') {openApp(result.app);searchClose();return;}
     const query=result.text.trim();if(!query)return;
@@ -1103,7 +1086,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
     organizerMode=mode;organizerFolderId=sourceFolder;organizerPlan=null;organizerBusy=false;selectedApps.clear();if(selectedId)selectedApps.add(selectedId);
     bulkDraft={action:'new',name:'常用 App',page:viewPages[currentPage].pageId,folder:state.folders[0]?.id||''};
     const scope=$('#organizerScope');scope.replaceChildren();[['all','全部桌面'],['current','当前桌面'],...(sourceFolder?[['folder','当前文件夹']]:[])].forEach(([value,label])=>{const option=el('option','',label);option.value=value;scope.append(option);});scope.value=sourceFolder?'folder':'all';
-    $('#organizerFilter').value='';$('#organizerExisting').checked=mode==='bulk';renderOrganizer();openSurface('organizer',mode==='ai'?$('#organizeButton'):$('#batchButton'));
+    $('#organizerFilter').value='';$('#organizerExisting').checked=mode==='bulk';renderOrganizer();openSurface('organizer',$('#organizeButton'));
   }
   function closeOrganizer() {organizerRequest?.abort();organizerRequest=null;organizerBusy=false;closeSurface('organizer');}
   function organizerApps() {
@@ -1147,7 +1130,8 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
     if(draft.action==='new'&&!draft.name.trim())return toast('请输入文件夹名称');
     if(draft.action==='new'&&ids.length<2)return toast('至少选择两个 App 才能创建文件夹');
     if(draft.action==='dock-add'&&new Set([...state.dock,...ids]).size>12)return toast('Dock 最多 12 个 App，请减少选择');
-    if(draft.action==='delete'&&!confirm(`删除选中的 ${ids.length} 个快捷方式？可撤销本次整理。`))return;
+    if(draft.action==='delete'&&!bulkDraft.confirmed){showDeleteConfirmation(`删除选中的 ${ids.length} 个 App？`,'本次批量整理完成后仍可撤销。',$('#organizerFooter .button-primary'),()=>{bulkDraft.confirmed=true;applyBulkOrganization();});return;}
+    delete bulkDraft.confirmed;
     applyOrganization(()=>{
       const previous=new Set(state.folders.filter(folder=>folder.appIds.length).map(folder=>folder.id));
       if(['new','folder','desktop'].includes(draft.action)){
@@ -1284,7 +1268,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
   function downloadJSON(value,name) {
     const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'})),link=el('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
-  function syncBusy(){return !!(dragState||resizeState||dropSettling||$('#editorDialog').open||surfaces.has('organizer')||document.activeElement?.matches('#settingsContent input:not([readonly]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),#settingsContent textarea,#settingsContent select,#folderName,#widgetDetails input:not([type="checkbox"]),#widgetDetails textarea'));}
+  function syncBusy(){return !!(deleteConfirmation||dragState||resizeState||dropSettling||$('#editorDialog').open||surfaces.has('organizer')||document.activeElement?.matches('#settingsContent input:not([readonly]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),#settingsContent textarea,#settingsContent select,#folderName,#widgetDetails input:not([type="checkbox"]),#widgetDetails textarea'));}
   function applySyncedState(raw) {
     const oldCity=JSON.stringify(state.city);state=normalize(raw);
     if(state.todoDate!==todayKey){state.todos.forEach(todo=>todo.done=false);state.todoDate=todayKey;}
@@ -1397,7 +1381,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
     }
     editorContext.fields=fields;if(!$('#editorDialog').open)$('#editorDialog').showModal();fields.name?.focus();
   }
-  function closeEditor() {$('#editorDialog').close();editorContext=null;}
+  function closeEditor() {closeDeleteConfirmation();$('#editorDialog').close();editorContext=null;}
   function saveEditor() {
     if(!editorContext)return;const {type,id,fields}=editorContext;
     if(type==='app'){
@@ -1427,9 +1411,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
   function deleteEditor() {
     if(!editorContext?.id)return;const {type,id}=editorContext;
     if(type==='folder'){closeEditor();dissolveFolder(id);return;}
-    if(type==='app'){state.apps=state.apps.filter(item=>item.id!==id);state.dock=state.dock.filter(x=>x!==id);state.history=state.history.filter(x=>x!==id);removeFromFolders(id);}
-    else state.widgets=state.widgets.filter(item=>item.id!==id);
-    closeEditor();refreshDesktop();toast('已删除');
+    confirmItemDelete(type,id,$('#editorDelete'));
   }
   function toggleMusic() {
     if(music.playing){music.playing=false;clearInterval(music.timer);music.timer=null;cancelAnimationFrame(music.frame);}
@@ -1466,7 +1448,6 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
   });
   $('#editModeButton').addEventListener('click',toggleEdit);
   $('#organizeButton').addEventListener('click',()=>openOrganizer('ai'));
-  $('#batchButton').addEventListener('click',()=>openOrganizer('bulk'));
   $('#undoOrganize').addEventListener('click',undoOrganization);
   $('#organizerClose').addEventListener('click',closeOrganizer);
   $('#organizerBackdrop').addEventListener('click',closeOrganizer);
@@ -1502,6 +1483,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
   $('#editorDelete').addEventListener('click',deleteEditor);
   $('#editorForm').addEventListener('submit',event=>{event.preventDefault();saveEditor();});
   document.addEventListener('keydown',event=>{
+    if(deleteConfirmation){if(event.key==='Escape'){event.preventDefault();closeDeleteConfirmation();return;}if(event.key==='Tab'){const buttons=$('#deletePopover').querySelectorAll('button'),next=event.shiftKey?buttons[0]:buttons[1];if(document.activeElement===next){event.preventDefault();(event.shiftKey?buttons[1]:buttons[0]).focus();}return;}}
     if(event.key==='Escape'&&(dragState?.active||resizeState)){event.preventDefault();if(dragState)stopTileDrag({pointerId:dragState.pointerId},true);if(resizeState)finishFolderResize({pointerId:resizeState.pointerId},true);return;}
     if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'&&!$('#editorDialog').open){event.preventDefault();if($('#settingsDialog').open)closeSettings();if(folderId)closeFolder();if(widgetId)closeWidgetDetails();searchOpen();return;}
     if(event.key==='Escape'&&!$('#appContextMenu').hidden){closeAppContext();return;}
@@ -1548,6 +1530,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
   viewport.addEventListener('pointerup',finishPointer);viewport.addEventListener('pointercancel',finishPointer);
   viewport.addEventListener('click',event=>{if(Date.now()<suppressClickUntil){event.preventDefault();event.stopPropagation();}},true);
   document.addEventListener('pointerdown',event=>{const menu=$('#appContextMenu');if(!menu.hidden&&!menu.contains(event.target))closeAppContext();
+    if(deleteConfirmation&&!$('#deletePopover').contains(event.target))closeDeleteConfirmation();
     if(sizingFolderId&&!event.target.closest('.folder-tile,.app-context-menu')){sizingFolderId=null;document.querySelectorAll('.folder-sizing').forEach(node=>node.classList.remove('folder-sizing'));}
   },true);
   document.addEventListener('contextmenu',event=>{if(event.defaultPrevented)return;if(event.target.closest('#desktopShell'))openDesktopContext(event);else closeAppContext();});

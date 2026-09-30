@@ -5,3 +5,10 @@ CREATE TABLE IF NOT EXISTS weboss_desktops (
   revision INTEGER NOT NULL CHECK (revision > 0),
   updated_at TEXT NOT NULL
 );
+
+-- Optional shared cache, initialized when generating a fallback icon with AI.
+CREATE TABLE IF NOT EXISTS weboss_site_icons (
+  icon_key TEXT PRIMARY KEY,
+  design_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);

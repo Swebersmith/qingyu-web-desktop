@@ -1,5 +1,6 @@
 import {validateGroups,organizationSignals} from './organizer.js';
 import {syncAPI} from './sync-api.js';
+import {iconAPI} from './icon-api.js';
 
 const json = (body,status=200) => Response.json(body,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 
@@ -56,6 +57,7 @@ async function organize(request,env) {
 export default {
   async fetch(request, env) {
     const path=new URL(request.url).pathname;
+    if(path==='/api/site-icon'||path==='/api/icon')return iconAPI(request,env);
     if(path==='/api/organize')return organize(request,env);
     if(path==='/api/sync'||path==='/api/sync/status'||path==='/api/sync/key')return syncAPI(request,env);
     if(path.startsWith('/api/'))return json({error:'not_found'},404);

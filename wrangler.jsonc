@@ -18,7 +18,9 @@
   },
   "ratelimits": [
     {"name":"AI_LIMITER","namespace_id":"10420930","simple":{"limit":6,"period":60}},
-    {"name":"SYNC_LIMITER","namespace_id":"10420931","simple":{"limit":60,"period":60}}
+    {"name":"SYNC_LIMITER","namespace_id":"10420931","simple":{"limit":60,"period":60}},
+    {"name":"ICON_AI_LIMITER","namespace_id":"10420932","simple":{"limit":12,"period":60}},
+    {"name":"ICON_LOOKUP_LIMITER","namespace_id":"10420933","simple":{"limit":60,"period":60}}
   ],
   "observability": {
     "enabled": true,
