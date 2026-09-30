@@ -82,17 +82,19 @@ Worker 的云同步接口通过 `env.DB` 读写数据库。首次同步请求会
 ### 启用内容和界面同步
 
 1. 部署最新代码，确保 D1 已通过变量 **`DB`** 绑定到 Worker。
-2. 在已有桌面的设备上打开右上角 ☁ 或「设置 → 云同步」，选择 **创建云桌面**。
-3. 点击 **复制密钥**。在其他设备打开同一 Workers 网站，在「云同步」中输入密钥，选择 **连接并使用云桌面**。接入前的本机桌面会自动备份。
+2. 在已有桌面的设备上打开右上角 ☁ 或「设置 → 云同步」。可以输入 **12～128 个字符的自定义密钥**（支持中文），或留空自动生成，再选择 **创建云桌面**。
+3. 在其他设备打开同一 Workers 网站，输入相同的自定义密钥，或通过 **复制密钥** 获得的设备连接码，选择 **连接并使用云桌面**。接入前的本机桌面会自动备份。
 4. 之后编辑内容或拖动位置会自动上传；页面显示时约每 12 秒检查远程更新，恢复网络或切回页面时也会检查。正在拖动、编辑 App 或批量整理时会延后拉取。右上角指示灯及同步面板显示状态，也可点击 **立即同步**。
 
 桌面、平板和手机的 `layout` 各自保存并同步，不强制把 PC 网格缩小到手机。同步范围包含快捷方式、页面、文件夹成员及尺寸、Widget、Todo、历史、Dock、搜索偏好、天气城市和壁纸；当前打开的窗口、搜索输入和播放状态留在各设备。自定义壁纸随配置同步，单份配置最多 1 MB；较大的图片可改用壁纸 URL。
 
-同步密钥由 256 位安全随机数生成，是云桌面的读写凭据。服务器仅保存密钥的 SHA-256 摘要；密钥不出现在 URL、普通桌面 JSON 备份或日志中。拥有相同密钥的设备共享同一桌面；不同密钥的数据隔离。此版本未提供账号登录或端到端加密，桌面内容以 JSON 保存于你绑定的 D1。断开仅移除本机连接，不删除云端或当前本机数据。
+自动密钥由 256 位安全随机数生成；自定义密钥在浏览器内经过 Unicode NFC 规范化及 PBKDF2-SHA-256（210,000 次迭代、固定应用盐）生成相同格式的设备连接码。自定义密钥原文不保存或发送，浏览器单独保存连接码，服务器仅保存其 SHA-256 摘要；两者都不出现在 URL、普通桌面 JSON 备份或日志中。拥有相同密钥或连接码的设备共享同一桌面；不同密钥的数据隔离。此版本未提供账号登录或端到端加密，桌面内容以 JSON 保存于你绑定的 D1。断开仅移除本机连接，不删除云端或当前本机数据。
+
+已连接后可展开 **更换自定义密钥**。完成同步后，服务器通过带版本条件的原子更新迁移云桌面的凭据，保留内容和布局，并让旧密钥失效；不会覆盖已使用该新密钥的其他桌面。其他设备需要输入新密钥重新连接。
 
 云端采用递增版本号及带版本条件的 SQL 更新，防止并发覆盖。客户端使用上次已同步版本进行三方合并：独立改动自动合并，同一字段的不同修改、删除与编辑、矛盾的文件夹归属会暂停写入。冲突面板可下载两个版本、使用云端或保留本机；被替换版本自动备份。同步记录和最近三份恢复备份保存在本机 IndexedDB，密钥单独保存在本机浏览器存储中，清除浏览器数据后需重新输入密钥。
 
-`GET /api/sync/status` 检查绑定状态；`GET /api/sync` 拉取、`PUT /api/sync` 保存均要求 `Authorization: Bearer <同步密钥>`，响应禁止缓存，写入校验配置结构、大小和版本号。`SYNC_LIMITER` 按访问 IP / Cloudflare 服务位置限制每分钟 60 次同步请求；该计数不是全局限额。静态 Pages 或普通静态预览继续支持本地保存，云同步需要 Workers API。
+`GET /api/sync/status` 检查绑定状态；`GET /api/sync` 拉取、`PUT /api/sync` 保存及 `POST /api/sync/key` 更换凭据均要求 `Authorization: Bearer <设备连接码>`，响应禁止缓存，写入校验配置结构、大小和版本号。`SYNC_LIMITER` 按访问 IP / Cloudflare 服务位置限制每分钟 60 次同步请求；该计数不是全局限额。静态 Pages 或普通静态预览继续支持本地保存，云同步需要 Workers API。
 
 实现依据 [D1 参数化查询](https://developers.cloudflare.com/d1/worker-api/prepared-statements/)、[D1 一致性与 Sessions API](https://developers.cloudflare.com/d1/worker-api/d1-database/)、[D1 限制](https://developers.cloudflare.com/d1/platform/limits/) 和 [Workers Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)。
 
@@ -102,9 +104,9 @@ Worker 的云同步接口通过 `env.DB` 读写数据库。首次同步请求会
 
 部署最新代码后，在 Cloudflare → Workers & Pages → `weboss` → 绑定 → 添加绑定中，选择 **Workers AI**，变量名称填 **`AI`** 并保存。无需把账号 ID 或 API Key 写进前端或仓库；D1 绑定与 AI 整理独立。
 
-「生成整理预览」会调用同源 `POST /api/organize`，使用 Workers AI 的 `@cf/meta/llama-3.3-70b-instruct-fp8-fast`。只发送所选 App 的名称和域名，不发送 URL 参数、历史记录、Todo 或壁纸。Worker 限制请求大小及 App 数量（每次 2～120 个），校验结果中的 App ID、去重，并通过 `AI_LIMITER` 限制每个 Cloudflare 服务位置每分钟 6 次推理请求；这不是全局用量上限。Workers AI 的实际用量和计费以 Cloudflare 控制台为准。
+「生成整理预览」会调用同源 `POST /api/organize`，使用 Workers AI 的 `@cf/meta/llama-3.3-70b-instruct-fp8-fast`。可以输入整理偏好，如「学习和开发分开」。模型综合名称、精确域名、用途路径及已有文件夹，区分同一平台的不同服务，输出简短分组理由；低于 0.72 的模型自评把握会被过滤（这个数值不是统计准确率）。只发送所选 App 的名称、域名、经过白名单筛选的语义路径段、已有文件夹名称及填写的偏好，不发送私有路径段、URL 参数、历史记录、Todo 或壁纸。Worker 限制请求大小及 App 数量（每次 2～120 个），校验结果中的 App ID、去重，并通过 `AI_LIMITER` 限制每个 Cloudflare 服务位置每分钟 6 次推理请求；这不是全局用量上限。Workers AI 的实际用量和计费以 Cloudflare 控制台为准。
 
-未绑定 AI、网络超时、服务失败或超过 120 个 App 时，界面自动改用本地名称 / 域名规则，并明确显示「本地智能整理」。不认识的站点和单个 App 保持原位；所有整理均先预览，再由用户应用。参考 [Workers AI 绑定](https://developers.cloudflare.com/workers-ai/configuration/bindings/) 和 [JSON Mode](https://developers.cloudflare.com/workers-ai/features/json-mode/)。
+未绑定 AI、网络超时、服务失败或超过 120 个 App 时，界面自动改用本地加权规则，并明确显示「本地智能整理」。本地规则优先匹配真实域名和子服务，再判断名称及用途路径，避免假域名的子串匹配；不能理解任意自然语言偏好。不认识的站点、判断冲突及单个 App 保持原位；AI 建议空列表时不会被本地规则重新强制归组。所有整理均先预览，再由用户应用。参考 [Workers AI 绑定](https://developers.cloudflare.com/workers-ai/configuration/bindings/) 和 [JSON Mode](https://developers.cloudflare.com/workers-ai/features/json-mode/)。
 
 ## 自定义
 

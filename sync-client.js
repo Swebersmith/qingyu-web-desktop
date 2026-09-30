@@ -1,4 +1,4 @@
-import {SYNC_KEY_PATTERN,MAX_SYNC_BYTES,sameState,mergeDesktop,validDesktop,generateSyncKey} from './sync-model.js';
+import {SYNC_KEY_PATTERN,MAX_SYNC_BYTES,sameState,mergeDesktop,validDesktop,generateSyncKey,resolveSyncKey} from './sync-model.js';
 
 export const SYNC_STORAGE_KEY='weboss-cloud-key-v1';
 const clone=value=>JSON.parse(JSON.stringify(value));
@@ -9,6 +9,9 @@ export const SYNC_MESSAGES={
   desktop_too_large:'桌面数据超过 1 MB，请缩小自定义壁纸或使用图片 URL。',
   invalid_desktop:'桌面配置无法同步，请检查导入的数据。',
   sync_key_required:'请输入完整的同步密钥。',
+  custom_key_invalid:'自定义密钥需要 12～128 个字符，可以使用中文；请勿使用换行。',
+  sync_key_in_use:'此密钥已用于另一云桌面，请换一个密钥或连接已有桌面。',
+  finish_sync_first:'请先完成同步并处理冲突，再更换密钥。',
   rate_limited:'同步操作较频繁，稍后自动重试。',
   sync_unavailable:'同步服务暂不可用。请部署 Workers 版本并检查网络。',
   cache_unavailable:'浏览器无法保存同步记录，请检查存储权限或空间。',
@@ -59,12 +62,12 @@ export class CloudSync {
       this.ready=true;this.status(this.key?(this.base?'pending':'reconnect'):'off');if(this.base)this.schedule(100);
     }catch(error){if(generation===this.generation){this.ready=true;this.status('error',error.message||SYNC_MESSAGES.cache_unavailable);}}
   }
-  async request(key,method='GET',payload,revision){
+  async request(key,method='GET',payload,revision,path='/api/sync'){
     const controller=new AbortController();this.controller=controller;const timer=setTimeout(()=>controller.abort(),12000);
     try{
       const headers={Authorization:`Bearer ${key}`};if(payload)headers['Content-Type']='application/json';if(revision)headers['If-None-Match']=`"${revision}"`;
       const body=payload?JSON.stringify(payload):undefined;if(body&&new TextEncoder().encode(body).byteLength>MAX_SYNC_BYTES)throw new SyncError('desktop_too_large');
-      const response=await this.fetcher('/api/sync',{method,headers,body,signal:controller.signal,cache:'no-store',credentials:'same-origin'});
+      const response=await this.fetcher(path,{method,headers,body,signal:controller.signal,cache:'no-store',credentials:'same-origin'});
       if(response.status===304)return {notModified:true};
       let data;try{data=await response.json();}catch{throw new SyncError('sync_unavailable');}
       if(!response.ok)throw new SyncError(data.error,response.status===409?data:undefined);
@@ -83,17 +86,36 @@ export class CloudSync {
   }
   async connect(key=generateSyncKey(),create=false){
     if(this.running||!this.ready)return false;
-    if(!SYNC_KEY_PATTERN.test(key))throw new SyncError('sync_key_required');
     const generation=++this.generation;this.running=true;this.controller?.abort();this.status('syncing');
     try{
+      try{key=await resolveSyncKey(key);}catch(error){throw new SyncError(error.message);}
+      if(this.generation!==generation)return false;
       const local=clone(this.getState()),response=await this.request(key,create?'PUT':'GET',create?{state:local,baseRevision:0}:undefined);
       if(this.generation!==generation)return false;
       const remote=create?{...response,state:local}:response;
       if(!create){await this.backup(this.getState(),'接入云桌面前');if(this.generation!==generation)return false;this.applyState(clone(remote.state));}
       this.key=key;await this.checkpoint(remote);if(this.generation!==generation)return false;
       this.storage.setItem(SYNC_STORAGE_KEY,key);this.conflict=null;this.status(sameState(this.getState(),this.base)?'synced':'pending');this.schedule();return true;
-    }catch(error){if(this.generation===generation)this.status('error',error.message);throw error;}
+    }catch(error){if(create&&error.code==='revision_conflict')error=new SyncError('sync_key_in_use');if(this.generation===generation)this.status('error',error.message);throw error;}
     finally{this.running=false;}
+  }
+  async changeKey(value){
+    if(this.running||!this.key||!this.base||this.conflict)throw new SyncError('finish_sync_first');
+    const initialGeneration=this.generation,initialKey=this.key;
+    let next;try{next=await resolveSyncKey(value);}catch(error){throw new SyncError(error.message);}
+    if(this.generation!==initialGeneration||this.key!==initialKey)return false;
+    await this.run(true);
+    if(this.generation!==initialGeneration||this.key!==initialKey)return false;
+    if(this.phase!=='synced'||!sameState(this.getState(),this.base)||this.running)throw new SyncError('finish_sync_first');
+    if(next===this.key)return true;
+    const generation=++this.generation;this.running=true;clearTimeout(this.timer);this.status('syncing');
+    try{
+      const response=await this.request(this.key,'POST',{newKey:next,baseRevision:this.revision},undefined,'/api/sync/key');
+      if(this.generation!==generation)return false;
+      this.key=next;this.storage.setItem(SYNC_STORAGE_KEY,next);await this.checkpoint({...response,state:this.base});
+      if(this.generation!==generation)return false;this.status(sameState(this.getState(),this.base)?'synced':'pending');return true;
+    }catch(error){if(this.generation===generation)this.status('error',error.message);throw error;}
+    finally{this.running=false;if(this.key&&this.base)this.schedule();}
   }
   disconnect(clearCredential=true){
     ++this.generation;this.controller?.abort();clearTimeout(this.timer);if(clearCredential)this.storage.removeItem(SYNC_STORAGE_KEY);

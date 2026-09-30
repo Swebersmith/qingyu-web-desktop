@@ -32,3 +32,17 @@ test('rate limits and invalid model output do not return misleading success',asy
   assert.equal((await worker.fetch(request(),bindings({groups:[{name:'错误',appIds:['unknown','0']}]}))).status,502);
   assert.equal((await worker.fetch(new Request('https://weboss.example/api/unknown'),{})).status,404);
 });
+test('AI receives preferences, existing folders and only semantic URL paths',async()=>{
+  let input;
+  const env=bindings({groups:[{name:'代码协作',appIds:['0','1'],reason:'管理和协作代码项目',confidence:.91}]});
+  env.AI.run=async(_model,data)=>{input=JSON.parse(data.messages[1].content);return {response:{groups:[{name:'代码协作',appIds:['0','1'],reason:'管理和协作代码项目',confidence:.91}]}};};
+  const response=await worker.fetch(request({...payload,instruction:'学习和开发分开',apps:[{...payload.apps[0],url:'https://user:secret@github.com/private/copilot?token=hidden#fragment',existingFolder:'我的工具'},payload.apps[1]]}),env);
+  assert.equal(input.preference,'学习和开发分开');assert.equal(input.apps[0].existingFolder,'我的工具');assert.equal(input.apps[0].path,'/copilot');assert.equal(input.apps[0].domain,'github.com');assert.ok(!JSON.stringify(input).match(/secret|private|hidden|fragment/));
+  assert.deepEqual((await response.json()).groups,[{name:'代码协作',appIds:['one','two'],reason:'管理和协作代码项目',confidence:.91}]);
+});
+test('an intentional empty AI plan is valid and malformed preferences never trigger inference',async()=>{
+  assert.deepEqual((await worker.fetch(request(),bindings({groups:[]}))).status,200);
+  const withheld=await worker.fetch(request(),bindings({groups:[{name:'暂不分组',appIds:['0','1'],confidence:.4,reason:'用途无法确定'}]}));assert.equal(withheld.status,200);assert.deepEqual((await withheld.json()).groups,[]);
+  const env=bindings();env.AI.run=()=>assert.fail('must not infer');
+  assert.equal((await worker.fetch(request({...payload,instruction:'x'.repeat(301)}),env)).status,400);
+});

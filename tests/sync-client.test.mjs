@@ -11,6 +11,12 @@ function server(){
   return {rows,calls,hook:null,async fetcher(url,options){
     calls.push({url,method:options.method});const key=options.headers.Authorization.slice(7),row=rows.get(key),payload=options.body?JSON.parse(options.body):null;
     await this.hook?.(options,payload);
+    if(url==='/api/sync/key'){
+      if(!row)return Response.json({error:'desktop_not_found'},{status:404});
+      if(rows.has(payload.newKey))return Response.json({error:'sync_key_in_use'},{status:409});
+      if(row.revision!==payload.baseRevision)return Response.json({error:'revision_conflict',...row},{status:409});
+      const next={...row,revision:row.revision+1};rows.delete(key);rows.set(payload.newKey,next);return Response.json({revision:next.revision,updatedAt:next.updatedAt});
+    }
     if(options.method==='GET'){
       if(!row)return Response.json({error:'desktop_not_found'},{status:404});
       if(options.headers['If-None-Match']===`"${row.revision}"`)return new Response(null,{status:304});return Response.json(row);
@@ -57,4 +63,22 @@ test('disconnect retains local data and prevents a stale response from applying 
   const service=server(),a=await device(service),key=generateSyncKey();t.after(()=>a.sync.disconnect());await a.sync.connect(key,true);const before=clone(a.state);
   let started,release;const fetching=new Promise(resolve=>started=resolve),hold=new Promise(resolve=>release=resolve);service.hook=async()=>{started();await hold;};const operation=a.sync.run();await fetching;a.sync.disconnect();release();await operation;
   assert.deepEqual(a.state,before);assert.equal(a.storage.getItem(SYNC_STORAGE_KEY),null);assert.equal(a.sync.phase,'off');
+});
+test('custom passphrases pair devices and rotation preserves data while revoking the old key',async t=>{
+  const service=server(),a=await device(service),b=await device(service),c=await device(service),phrase='Weboss 自定义云桌面 2026',nextPhrase='Weboss 新的同步密钥 2026';
+  t.after(()=>{a.sync.disconnect();b.sync.disconnect();c.sync.disconnect();});
+  await a.sync.connect(phrase,true);await b.sync.connect(phrase);assert.equal(a.sync.key,b.sync.key);
+  assert.ok(!JSON.stringify([...service.rows]).includes(phrase));assert.notEqual(a.storage.getItem(SYNC_STORAGE_KEY),phrase);
+  a.edit(data=>data.apps[0].name='更换前的内容');const old=a.sync.key;
+  await a.sync.changeKey(nextPhrase);assert.ok(!service.rows.has(old));assert.equal(service.rows.get(a.sync.key).state.apps[0].name,'更换前的内容');
+  await b.sync.run(true);assert.equal(b.sync.phase,'error');assert.match(b.sync.detail,/找不到/);
+  await b.sync.connect(nextPhrase);assert.equal(b.state.apps[0].name,'更换前的内容');
+  await c.sync.connect(a.sync.key);assert.equal(c.state.apps[0].name,'更换前的内容');
+  await assert.rejects(c.sync.connect(nextPhrase,true),/此密钥已用于/);
+});
+test('rotation cannot replace an occupied cloud desktop or proceed through unresolved conflicts',async t=>{
+  const service=server(),a=await device(service),b=await device(service),other=generateSyncKey();t.after(()=>{a.sync.disconnect();b.sync.disconnect();});
+  await a.sync.connect(generateSyncKey(),true);await b.sync.connect(other,true);const old=a.sync.key;
+  await assert.rejects(a.sync.changeKey(other),/另一云桌面/);assert.equal(a.sync.key,old);assert.equal(service.rows.size,2);
+  a.sync.conflict={remote:{state:desktop(),revision:1},fields:['apps.a.name']};await assert.rejects(a.sync.changeKey('abcdefghijklmnop'),/处理冲突/);assert.equal(service.rows.size,2);
 });

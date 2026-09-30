@@ -8,6 +8,7 @@ export const SYNC_SCHEMA=`CREATE TABLE IF NOT EXISTS weboss_desktops (
 )`;
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Vary':'Authorization'};
 const json=(body,status=200,extra={})=>Response.json(body,{status,headers:{...headers,...extra}});
+const keyHash=async key=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(key))),byte=>byte.toString(16).padStart(2,'0')).join('');
 async function readJSON(request){
   const reader=request.body?.getReader();if(!reader)throw Error('invalid');
   const chunks=[];let size=0;
@@ -23,19 +24,31 @@ export async function syncAPI(request,env){
   const path=new URL(request.url).pathname,origin=request.headers.get('Origin');
   if((origin&&origin!==new URL(request.url).origin)||request.headers.get('Sec-Fetch-Site')==='cross-site')return json({error:'same_origin_required'},403);
   if(path==='/api/sync/status')return request.method==='GET'?json({configured:!!env.DB}):json({error:'method_not_allowed'},405);
-  if(!['GET','PUT'].includes(request.method))return json({error:'method_not_allowed'},405);
+  const changingKey=path==='/api/sync/key';
+  if(changingKey?request.method!=='POST':!['GET','PUT'].includes(request.method))return json({error:'method_not_allowed'},405);
   const key=request.headers.get('Authorization')?.replace(/^Bearer /,'');
   if(!SYNC_KEY_PATTERN.test(key||''))return json({error:'sync_key_required'},401);
   if(!env.DB)return json({error:'database_not_bound'},503);
   if(env.SYNC_LIMITER){try{const {success}=await env.SYNC_LIMITER.limit({key:request.headers.get('CF-Connecting-IP')||'local'});if(!success)return json({error:'rate_limited'},429);}catch{return json({error:'database_unavailable'},503);}}
   let payload;
-  if(request.method==='PUT'){
+  if(request.method==='PUT'||changingKey){
     if(!request.headers.get('Content-Type')?.toLowerCase().startsWith('application/json'))return json({error:'json_required'},415);
-    try{payload=await readJSON(request);if(!Number.isSafeInteger(payload.baseRevision)||payload.baseRevision<0||!validDesktop(payload.state))throw Error('invalid');}
+    try{payload=await readJSON(request);if(!Number.isSafeInteger(payload.baseRevision)||payload.baseRevision<(changingKey?1:0)||(changingKey?!SYNC_KEY_PATTERN.test(payload.newKey||''):!validDesktop(payload.state)))throw Error('invalid');}
     catch(error){return json({error:error.message==='large'?'desktop_too_large':'invalid_desktop'},error.message==='large'?413:400);}
   }
-  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(key)),id=Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+  const id=await keyHash(key);
   async function operation(){
+    if(changingKey){
+      const nextId=await keyHash(payload.newKey),updatedAt=new Date().toISOString();
+      if(nextId===id){const desktop=await readDesktop(db,id);return desktop?json({revision:desktop.revision,updatedAt:desktop.updatedAt}):json({error:'desktop_not_found'},404);}
+      const result=await db.prepare('UPDATE weboss_desktops SET id = ?2, revision = revision + 1, updated_at = ?3 WHERE id = ?1 AND revision = ?4 AND NOT EXISTS (SELECT 1 FROM weboss_desktops WHERE id = ?2)').bind(id,nextId,updatedAt,payload.baseRevision).run();
+      if(!result.meta.changes){
+        const remote=await readDesktop(db,id);if(!remote)return json({error:'desktop_not_found'},404);
+        if(await db.prepare('SELECT revision FROM weboss_desktops WHERE id = ?1').bind(nextId).first())return json({error:'sync_key_in_use'},409);
+        return json({error:'revision_conflict',...remote},409);
+      }
+      return json({revision:payload.baseRevision+1,updatedAt});
+    }
     if(request.method==='GET'){
       const row=await db.prepare('SELECT revision, updated_at FROM weboss_desktops WHERE id = ?1').bind(id).first();
       if(!row)return json({error:'desktop_not_found'},404);

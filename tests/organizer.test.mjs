@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {suggestGroups,validateGroups,folderMetrics} from '../organizer.js';
+import {suggestGroups,validateGroups,folderMetrics,organizationSignals} from '../organizer.js';
 
 const apps=[
   {id:'github',name:'GitHub',url:'https://github.com'},
@@ -32,4 +32,16 @@ test('complete folder cells fit phone, tablet, wide and short folder sizes',()=>
     assert.ok(metrics.capacity>=1);
   }
   assert.equal(folderMetrics(60,78,true).capacity,9);
+});
+test('services on the same platform use their specific purpose, not their shared brand',()=>{
+  const input=[['search','Google','https://google.com'],['bing','Bing','https://bing.com'],['drive','Google Drive','https://drive.google.com'],['docs','Google Docs','https://docs.google.com'],['translate','Google 翻译','https://translate.google.com'],['deepl','DeepL','https://deepl.com'],['film','豆瓣电影','https://movie.douban.com'],['video','YouTube','https://youtube.com'],['dmusic','豆瓣音乐','https://music.douban.com'],['spotify','Spotify','https://spotify.com'],['fake','自用','https://github.com.attacker.example'],['fake2','自用','https://notgoogle.com']].map(([id,name,url])=>({id,name,url}));
+  assert.deepEqual(suggestGroups(input),[{name:'搜索',appIds:['search','bing']},{name:'效率办公',appIds:['drive','docs']},{name:'翻译工具',appIds:['translate','deepl']},{name:'影音',appIds:['film','video']},{name:'音乐',appIds:['dmusic','spotify']}]);
+});
+test('purpose paths are preserved but private segments, query, credentials and fragments are omitted',()=>{
+  assert.deepEqual(organizationSignals({url:'https://user:secret@example.com/private123/courses/account-token?token=hidden#private'}),{domain:'example.com',path:'/courses'});
+  const input=[{id:'c1',name:'我的收藏',url:'https://youtube.com/learning'},{id:'c2',name:'我的收藏',url:'https://bilibili.com/courses'},{id:'v1',name:'视频',url:'https://youtube.com/watch'},{id:'v2',name:'视频',url:'https://bilibili.com/anime'}];
+  assert.deepEqual(suggestGroups(input),[{name:'学习阅读',appIds:['c1','c2']},{name:'影音',appIds:['v1','v2']}]);
+});
+test('low-confidence groups stay untouched and explanatory metadata is bounded',()=>{
+  assert.deepEqual(validateGroups([{name:'猜测',appIds:['github','gitlab'],confidence:.5},{name:'开发',appIds:['github','gitlab'],confidence:.95,reason:'  代码协作  '}],apps),[{name:'开发',appIds:['github','gitlab'],confidence:.95,reason:'代码协作'}]);
 });

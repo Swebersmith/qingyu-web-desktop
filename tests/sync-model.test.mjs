@@ -35,3 +35,12 @@ test('invalid shared state rejects unsafe URLs, orphan pages, duplicates and mal
     const data=desktop();mutate(data);assert.equal(validDesktop(data),false);
   }
 });
+test('custom keys work across devices, normalize Unicode, and retain legacy connection codes',async()=>{
+  const {resolveSyncKey}=await import('../sync-model.js');
+  const phrase='Weboss 我的桌面密钥 2026';
+  const first=await resolveSyncKey(phrase),second=await resolveSyncKey('  '+phrase+'  ');
+  assert.match(first,/^wo_[A-Za-z0-9_-]{43}$/);assert.equal(first,second);assert.equal(await resolveSyncKey(first),first);
+  assert.notEqual(first,await resolveSyncKey(phrase+'另一台'));
+  assert.equal(await resolveSyncKey('abcdefghijkl-é'),await resolveSyncKey('abcdefghijkl-e\u0301'));
+  await assert.rejects(resolveSyncKey('短密钥'),/custom_key_invalid/);await assert.rejects(resolveSyncKey('wo_输入错误'),/sync_key_required/);
+});

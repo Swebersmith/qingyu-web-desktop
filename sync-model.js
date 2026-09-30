@@ -1,6 +1,16 @@
 import {reconcileDesktop} from './desktop-model.js';
 
 export const SYNC_KEY_PATTERN=/^wo_[A-Za-z0-9_-]{43}$/;
+// Derive a stable ASCII credential; never send or persist the user's passphrase.
+export async function resolveSyncKey(value) {
+  const key=String(value||'').trim().normalize('NFC');
+  if(SYNC_KEY_PATTERN.test(key))return key;
+  if(key.startsWith('wo_'))throw Error('sync_key_required');
+  if([...key].length<12||[...key].length>128||/[\u0000-\u001f\u007f]/u.test(key))throw Error('custom_key_invalid');
+  const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(key),'PBKDF2',false,['deriveBits']);
+  const bytes=new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',salt:new TextEncoder().encode('Weboss desktop sync v1'),iterations:210000,hash:'SHA-256'},material,256));
+  return 'wo_'+btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
 export const MAX_SYNC_BYTES=1000000;
 const clone=value=>value===undefined?undefined:JSON.parse(JSON.stringify(value));
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
