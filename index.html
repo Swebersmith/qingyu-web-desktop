@@ -105,6 +105,7 @@
         <nav class="organizer-tabs" aria-label="整理方式"><button type="button" id="organizerBulkTab">批量整理</button><button type="button" id="organizerAITab">✧ AI 自动整理</button></nav>
         <div class="organizer-controls"><label>范围 <select id="organizerScope" aria-label="整理范围"></select></label><input id="organizerFilter" type="search" placeholder="查找 App…" aria-label="筛选 App" /><label class="organizer-existing"><input id="organizerExisting" type="checkbox" />包含已有文件夹</label></div>
         <label id="organizerPreference" class="organizer-preference" hidden><span>告诉 AI 你想怎么整理</span><input id="organizerInstruction" type="text" maxlength="300" aria-label="AI 整理偏好" placeholder="例如：学习和开发分开，音乐单独一组，文件夹少一点" /></label>
+        <div id="organizerOptions" class="organizer-options" hidden><label><input id="organizerGrouping" type="checkbox" checked />自动分组</label><label><input id="organizerLayout" type="checkbox" checked />整理布局</label><small id="organizerLayoutHint">小组件分区、常用入口优先、大文件夹自动调节尺寸；先预览再应用。</small></div>
         <div class="organizer-content" id="organizerContent"></div>
         <footer class="organizer-footer" id="organizerFooter"></footer>
       </div>

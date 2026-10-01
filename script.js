@@ -7,6 +7,7 @@ import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-
 import {IconStore} from './icon-client.js';
 import {loadDailyBing} from './wallpaper-client.js';
 import {bingImageID,bingProxyURL} from './wallpaper-model.js';
+import {planDesktopOrganization,desktopTileSize,resolveTilePositions} from './layout-organizer.js';
 
 (() => {
   'use strict';
@@ -329,20 +330,7 @@ import {bingImageID,bingProxyURL} from './wallpaper-model.js';
     return Math.max(3,Math.floor((viewport.clientHeight-heading+gap-4)/(row+gap)));
   }
   function tileSize(item, mode) {
-    if (item.kind === 'app') return { w: 1, h: 1 };
-    if(item.kind==='folder'){
-      const size=item.data.sizes[mode]||{w:2,h:2};
-      return {w:Math.max(1,Math.min(gridColumns(mode),Math.round(Number(size.w)||2))),h:Math.max(1,Math.min(rowsPerPage,Math.round(Number(size.h)||2)))};
-    }
-    const type = item.data.type;
-    if (mode === 'mobile') {
-      if (type === 'clock') return { w: 4, h: 1 };
-      if (type === 'watching' || type === 'calendar') return { w: 4, h: 3 };
-      if (type === 'todo' || type === 'player') return { w: 2, h: 3 };
-      return { w: item.data.size === 'wide' ? 4 : 2, h: 2 };
-    }
-    if (mode === 'tablet') return { w: type === 'clock' || item.data.size === 'wide' ? 4 : 2, h: type === 'calendar' || type === 'todo' ? 3 : 2 };
-    return { w: type === 'clock' || item.data.size === 'wide' ? 4 : item.data.size === 'small' ? 2 : 3, h: type === 'calendar' || type === 'todo' ? 3 : 2 };
+    return desktopTileSize(item,mode,{columns:gridColumns(mode),rows:rowsPerPage});
   }
   function pageItems(pageId, mode, maxRows=rowsPerPage) {
     const widgets = state.widgets.filter(item => item.page === pageId).map(data => ({ kind: 'widget', data, id: data.id }));
@@ -361,27 +349,7 @@ import {bingImageID,bingProxyURL} from './wallpaper-model.js';
     return [...widgets, ...folders, ...apps];
   }
   function layoutPage(pageId, mode, maxRows) {
-    const columns = gridColumns(mode), occupied = new Set(), positions = new Map();
-    const saved = state.layout[mode];
-    const items = pageItems(pageId, mode,maxRows).sort((a,b) => (Number(saved[b.id]?.priority)||0) - (Number(saved[a.id]?.priority)||0));
-    const area=items.reduce((sum,item)=>{const {w,h}=tileSize(item,mode);return sum+w*h;},0);
-    const usefulRowLimit=Math.ceil(area/columns)+maxRows;
-    const canFit = (x,y,w,h) => {
-      if (x < 0 || y < 0 || x + w > columns || y%maxRows+h>maxRows) return false;
-      for (let row=y;row<y+h;row++) for(let col=x;col<x+w;col++) if(occupied.has(`${col},${row}`)) return false;
-      return true;
-    };
-    items.forEach(item => {
-      const {w,h} = tileSize(item,mode), pref = saved[item.id]?.page === pageId ? saved[item.id] : null;
-      let x = Number(pref?.x), y = Number(pref?.y);
-      if (y>usefulRowLimit) y=NaN;
-      if (!Number.isInteger(x) || !Number.isInteger(y) || !canFit(x,y,w,h)) {
-        outer: for(y=0;y<Math.max(120,usefulRowLimit+maxRows);y++) for(x=0;x<=columns-w;x++) if(canFit(x,y,w,h)) break outer;
-      }
-      positions.set(item.id,{x,y,w,h});
-      for(let row=y;row<y+h;row++) for(let col=x;col<x+w;col++) occupied.add(`${col},${row}`);
-    });
-    return positions;
+    return resolveTilePositions(pageItems(pageId,mode,maxRows),state.layout[mode],pageId,mode,{columns:gridColumns(mode),rows:maxRows});
   }
   function appendDesktopView(page,segment,screenIndex,total,items,positions,mode,temporary=false) {
     viewPages.push({pageId:page.id,name:page.name,segment,screenIndex,total,temporary});
@@ -972,7 +940,8 @@ import {bingImageID,bingProxyURL} from './wallpaper-model.js';
   }
   function surfaceTarget(name) {
     const width=Math.min(['settings','organizer'].includes(name)?880:name==='widget'?760:name==='folder'?620:650,innerWidth-24);
-    const height=Math.min(['settings','organizer','widget'].includes(name)?660:name==='folder'?580:480,innerHeight-(name==='search'?innerHeight-$('#searchTrigger').getBoundingClientRect().bottom+24:40));
+    const preferredHeight=name==='organizer'&&innerWidth<=700?innerHeight-24:['settings','organizer','widget'].includes(name)?660:name==='folder'?580:480;
+    const height=Math.min(preferredHeight,innerHeight-(name==='search'?innerHeight-$('#searchTrigger').getBoundingClientRect().bottom+24:name==='organizer'&&innerWidth<=700?24:40));
     return {left:(innerWidth-width)/2,top:name==='search'?$('#searchTrigger').getBoundingClientRect().bottom-height:(innerHeight-height)/2,width,height};
   }
   function geometry(rect,radius) { return {left:`${rect.left}px`,top:`${rect.top}px`,width:`${rect.width}px`,height:`${rect.height}px`,borderRadius:`${radius}px`}; }
@@ -1059,7 +1028,7 @@ import {bingImageID,bingProxyURL} from './wallpaper-model.js';
     const looksLikeDomain=/^(?:[\w-]+\.)+[a-z]{2,}(?:\/\S*)?$/i.test(query);
     window.open(looksLikeDomain&&url?url:engines.find(e=>e.id===activeEngine).url+encodeURIComponent(query),'_blank','noopener,noreferrer');searchClose();
   }
-  function organizationSnapshot() {return clone({pages:state.pages,apps:state.apps,folders:state.folders,layout:state.layout,dock:state.dock,history:state.history,favoriteIds:state.favoriteIds});}
+  function organizationSnapshot() {return clone({pages:state.pages,apps:state.apps,widgets:state.widgets,folders:state.folders,layout:state.layout,dock:state.dock,history:state.history,favoriteIds:state.favoriteIds});}
   function animateDesktopMutation(action) {
     const old=new Map([...document.querySelectorAll('.desktop-canvas>[data-id]')].map(node=>[node.dataset.id,node.getBoundingClientRect()]));
     action();refreshDesktop();
@@ -1088,7 +1057,7 @@ import {bingImageID,bingProxyURL} from './wallpaper-model.js';
     organizerMode=mode;organizerFolderId=sourceFolder;organizerPlan=null;organizerBusy=false;selectedApps.clear();if(selectedId)selectedApps.add(selectedId);
     bulkDraft={action:'new',name:'常用 App',page:viewPages[currentPage].pageId,folder:state.folders[0]?.id||''};
     const scope=$('#organizerScope');scope.replaceChildren();[['all','全部桌面'],['current','当前桌面'],...(sourceFolder?[['folder','当前文件夹']]:[])].forEach(([value,label])=>{const option=el('option','',label);option.value=value;scope.append(option);});scope.value=sourceFolder?'folder':'all';
-    $('#organizerFilter').value='';$('#organizerExisting').checked=mode==='bulk';renderOrganizer();openSurface('organizer',$('#organizeButton'));
+    $('#organizerFilter').value='';$('#organizerExisting').checked=mode==='bulk';$('#organizerGrouping').checked=true;$('#organizerLayout').checked=true;renderOrganizer();openSurface('organizer',$('#organizeButton'));
   }
   function closeOrganizer() {organizerRequest?.abort();organizerRequest=null;organizerBusy=false;closeSurface('organizer');}
   function organizerApps() {
@@ -1096,17 +1065,44 @@ import {bingImageID,bingProxyURL} from './wallpaper-model.js';
     return state.apps.filter(app=>!app.system&&(organizerMode!=='ai'||!state.dock.includes(app.id))&&(scope!=='current'||app.page===viewPages[currentPage].pageId)&&(scope!=='folder'||folderById(organizerFolderId)?.appIds.includes(app.id))&&($('#organizerExisting').checked||scope==='folder'||!folderOfApp(app.id))&&`${app.name} ${app.url}`.toLocaleLowerCase().includes(query));
   }
   function organizerButton(label,handler,className='chip-button') {const button=el('button',className,label);button.type='button';button.addEventListener('click',handler);return button;}
+  function organizationScope() {
+    const scope=$('#organizerScope').value;
+    return {pageIds:scope==='all'?state.pages.map(page=>page.id):[scope==='folder'?folderById(organizerFolderId)?.page:viewPages[currentPage]?.pageId].filter(Boolean),...(scope==='folder'?{folderIds:[organizerFolderId]}:{})};
+  }
+  function organizationLayoutCount() {
+    const {pageIds,folderIds}=organizationScope();if(folderIds)return folderById(organizerFolderId)?.appIds.length?1:0;
+    return state.widgets.filter(item=>pageIds.includes(item.page)).length+state.folders.filter(item=>pageIds.includes(item.page)).length+state.apps.filter(app=>pageIds.includes(app.page)&&!state.dock.includes(app.id)&&!folderOfApp(app.id)).length;
+  }
+  function organizationBaseState() {
+    const base=clone(state),mode=layoutMode();
+    document.querySelectorAll('.desktop-canvas>[data-id]').forEach(node=>{const {x,y}=tilePosition(node);base.layout[mode][node.dataset.id]={page:node.dataset.page,x,y,priority:Number(base.layout[mode][node.dataset.id]?.priority)||1};});return base;
+  }
+  function organizationProfiles() {
+    const profiles={desktop:{columns:12,rows:7,width:1296,row:78,gap:12},tablet:{columns:8,rows:7,width:922,row:76,gap:10},mobile:{columns:4,rows:7,width:364,row:75,gap:9}},mode=layoutMode();
+    const canvas=$('.desktop-canvas'),width=canvas?.getBoundingClientRect().width||innerWidth-26;
+    profiles[mode]={columns:gridColumns(mode),rows:availableRows(mode),width,...gridMetric(mode)};return profiles;
+  }
+  function updateOrganizationDraft() {
+    if(!organizerPlan)return;
+    organizerPlan.result=planDesktopOrganization(organizerPlan.base,organizerPlan.groups,{...organizerPlan.scope,profiles:organizationProfiles(),arrange:$('#organizerLayout').checked});
+  }
   function renderOrganizer() {
     if(organizerMode==='ai')for(const id of selectedApps)if(state.dock.includes(id))selectedApps.delete(id);
+    $('#organizerDialog').classList.toggle('organizer-review',!!organizerPlan&&organizerMode==='ai');
     $('#organizerBulkTab').classList.toggle('active',organizerMode==='bulk');$('#organizerAITab').classList.toggle('active',organizerMode==='ai');
-    $('#organizerPreference').hidden=organizerMode!=='ai';$('#organizerInstruction').disabled=organizerBusy;
+    $('#organizerPreference').hidden=organizerMode!=='ai'||!$('#organizerGrouping').checked||!!organizerPlan;$('#organizerInstruction').disabled=organizerBusy;
+    $('#organizerOptions').hidden=organizerMode!=='ai';$('#organizerGrouping').disabled=$('#organizerLayout').disabled=organizerBusy;
+    $('#organizerLayoutHint').textContent=$('#organizerScope').value==='folder'?'调整此文件夹的尺寸与常用 App 顺序，其他桌面元素保留位置。':'布局会整理范围内整个桌面及分组的目标桌面；分组只作用于所选 App。';
     $('#organizerExisting').closest('label').hidden=organizerMode!=='ai'||$('#organizerScope').value==='folder';
     $('#organizerFilter').disabled=organizerBusy;$('#organizerScope').disabled=organizerBusy;$('#organizerExisting').disabled=organizerBusy;
     $('#organizerBulkTab').disabled=$('#organizerAITab').disabled=organizerBusy;
     const content=$('#organizerContent');content.replaceChildren();
     if(organizerPlan&&organizerMode==='ai'){renderOrganizationPreview(content);renderOrganizerFooter();return;}
+    if(organizerMode==='ai'&&!$('#organizerGrouping').checked){
+      const intro=el('div','organization-layout-intro');intro.append(el('span','','▦'),el('h3','','让桌面留出呼吸感'),el('p','','小组件形成清晰分区，收藏和最近使用的入口优先放在首屏。大文件夹按内容调整尺寸，多余内容横向分屏显示。'),el('small','',`当前范围 ${organizationLayoutCount()} 个桌面元素 · 保留现有文件夹分组`));content.append(intro);renderOrganizerFooter();return;
+    }
     const apps=organizerApps(),bar=el('div','organizer-selection-bar');
-    bar.append(el('p','',organizerMode==='ai'?'相同用途的 App 放进同一个文件夹，先预览再应用。':'选择 App，一次完成移动、合并或清理。'),organizerButton('全选当前结果',()=>{apps.forEach(app=>selectedApps.add(app.id));renderOrganizer();}),organizerButton('清空选择',()=>{selectedApps.clear();renderOrganizer();}));content.append(bar);
+    bar.append(el('p','',organizerMode==='ai'?'相同用途自动分组，同时规划 App、文件夹和小组件的位置。':'选择 App，一次完成移动、合并或清理。'),organizerButton('全选当前结果',()=>{apps.forEach(app=>selectedApps.add(app.id));renderOrganizer();}),organizerButton('清空选择',()=>{selectedApps.clear();renderOrganizer();}));content.append(bar);
     const grid=el('div','organizer-app-grid');apps.forEach(app=>{
       const label=el('label',`organizer-app${selectedApps.has(app.id)?' selected':''}`),check=el('input');check.type='checkbox';check.checked=selectedApps.has(app.id);check.disabled=organizerBusy;check.setAttribute('aria-label',`选择 ${app.name}`);
       check.addEventListener('change',()=>{if(check.checked)selectedApps.add(app.id);else selectedApps.delete(app.id);label.classList.toggle('selected',check.checked);renderOrganizerFooter();});
@@ -1116,9 +1112,10 @@ import {bingImageID,bingProxyURL} from './wallpaper-model.js';
   function renderOrganizerFooter() {
     const footer=$('#organizerFooter');footer.replaceChildren();
     if(organizerMode==='ai'){
-      const copy=el('div','organizer-footer-copy');copy.append(el('strong','',organizerBusy?'正在理解用途并生成预览…':organizerPlan?organizerPlan.source:`${selectedApps.size?`已选择 ${selectedApps.size} 个`:`当前范围 ${organizerApps().length} 个`} App`),el('small','',organizerPlan?'可改名、调整成员和目标桌面；未归组的 App 保持原位。':'综合名称、域名、用途路径与已有文件夹；服务不可用时使用本地规则。'));footer.append(copy);
-      if(organizerPlan){footer.append(organizerButton('重新选择',()=>{organizerPlan=null;renderOrganizer();},'button-secondary'));const apply=organizerButton('应用整理',applyAIOrganization,'button-primary');apply.disabled=!validateGroups(organizerPlan.groups.filter(group=>group.enabled),state.apps).length;footer.append(apply);}
-      else{const button=organizerButton(organizerBusy?'整理中…':'生成整理预览',generateOrganization,'button-primary');button.disabled=organizerBusy||(selectedApps.size||organizerApps().length)<2;footer.append(button);}return;
+      const grouping=$('#organizerGrouping').checked,arrange=$('#organizerLayout').checked;
+      const copy=el('div','organizer-footer-copy');copy.append(el('strong','',organizerBusy?'正在理解用途并生成预览…':organizerPlan?organizerPlan.source:grouping?`${selectedApps.size?`已选择 ${selectedApps.size} 个`:`当前范围 ${organizerApps().length} 个`} App`:`${organizationLayoutCount()} 个元素 · 仅整理布局`),el('small','',organizerPlan?arrange?'布局和文件夹一起应用，可撤销；Dock 保持不变。':'可修改文件夹；桌面元素保留现有位置。':grouping?'按用途分组；布局在本机规划，服务不可用时仍可整理。':'为手机、平板和桌面分别规划布局，无需连接 AI 服务。'));footer.append(copy);
+      if(organizerPlan){footer.append(organizerButton('重新选择',()=>{organizerPlan=null;renderOrganizer();},'button-secondary'));const apply=organizerButton('应用整理',applyAIOrganization,'button-primary');apply.disabled=!organizerPlan.result?.stats.groups&&!(arrange&&organizerPlan.result?.modes[layoutMode()].screenCount);footer.append(apply);}
+      else{const button=organizerButton(organizerBusy?'整理中…':'生成整理预览',generateOrganization,'button-primary');button.disabled=organizerBusy||(!grouping&&!arrange)||((!grouping||(selectedApps.size||organizerApps().length)<2)&&!(arrange&&organizationLayoutCount()));footer.append(button);}return;
     }
     const count=el('strong','batch-count',`已选 ${selectedApps.size} 个`),command=el('select');command.id='batchCommand';command.setAttribute('aria-label','批量操作');
     [['new','合并为新文件夹'],['folder','移入已有文件夹'],['desktop','移到桌面'],['dock-add','加入 Dock'],['dock-remove','移出 Dock'],['delete','删除快捷方式']].forEach(([value,label])=>{const option=el('option','',label);option.value=value;command.append(option);});command.value=bulkDraft.action;command.addEventListener('change',()=>{bulkDraft.action=command.value;renderOrganizerFooter();});footer.append(count,command);
@@ -1147,7 +1144,11 @@ import {bingImageID,bingProxyURL} from './wallpaper-model.js';
     },`已整理 ${ids.length} 个 App`);
   }
   async function generateOrganization() {
-    const apps=(selectedApps.size?[...selectedApps].map(appById):organizerApps()).filter(app=>app&&!app.system&&!state.dock.includes(app.id));if(apps.length<2)return toast('至少选择两个桌面 App');
+    const apps=(selectedApps.size?[...selectedApps].map(appById):organizerApps()).filter(app=>app&&!app.system&&!state.dock.includes(app.id));
+    if(!$('#organizerGrouping').checked||apps.length<2){
+      if(!$('#organizerLayout').checked||!organizationLayoutCount())return toast('请选择至少两个 App，或开启布局整理');
+      organizerPlan={groups:[],source:'本地布局规划 · 保留现有分组',base:organizationBaseState(),signature:JSON.stringify(organizationSnapshot()),scope:organizationScope(),previewMode:layoutMode()};renderOrganizer();return;
+    }
     organizerRequest?.abort();const controller=new AbortController();organizerRequest=controller;organizerBusy=true;renderOrganizer();const timer=setTimeout(()=>controller.abort(),30000);
     let groups,source='本地智能整理 · 未连接 AI 服务';
     try{
@@ -1157,33 +1158,47 @@ import {bingImageID,bingProxyURL} from './wallpaper-model.js';
     }catch{groups=suggestGroups(apps);source=controller.signal.aborted?'本地智能整理 · AI 请求超时':apps.length>120?'本地智能整理 · 当前范围超过 120 个 App':'本地智能整理 · AI 不可用';}
     finally{clearTimeout(timer);}
     if(organizerRequest!==controller)return;organizerRequest=null;organizerBusy=false;
-    groups.forEach(group=>{const counts=new Map();group.appIds.forEach(id=>{const page=appById(id).page;counts.set(page,(counts.get(page)||0)+1);});group.page=[...counts].sort((a,b)=>b[1]-a[1])[0][0];group.enabled=true;});
-    organizerPlan={groups,source};renderOrganizer();
+    groups.forEach(group=>{const counts=new Map();group.appIds.forEach(id=>{const page=appById(id).page;counts.set(page,(counts.get(page)||0)+1);});group.page=[...counts].sort((a,b)=>b[1]-a[1])[0][0];group.enabled=true;group.folderId=crypto.randomUUID();});
+    organizerPlan={groups,source,base:organizationBaseState(),signature:JSON.stringify(organizationSnapshot()),scope:organizationScope(),previewMode:layoutMode()};renderOrganizer();
   }
   function renderOrganizationPreview(root) {
-    const groups=organizerPlan.groups,used=new Set(groups.flatMap(group=>group.appIds));root.append(el('p','organizer-preview-summary',`建议 ${groups.length} 个文件夹 · ${used.size} 个 App · 先看看是否合你心意`));
+    updateOrganizationDraft();const preview=el('section','organization-layout-preview');preview.id='organizationLayoutPreview';root.append(preview);renderOrganizationLayout(preview);
+    const groups=organizerPlan.groups,used=new Set(groups.filter(group=>group.enabled).flatMap(group=>group.appIds));if(groups.length)root.append(el('p','organizer-preview-summary',`建议 ${groups.length} 个文件夹 · ${used.size} 个 App · 分组修改后布局同步更新`));
     groups.forEach(group=>{
-      const card=el('section',`organization-group${group.enabled?'':' disabled'}`),head=el('div','organization-group-head'),check=el('input');check.type='checkbox';check.checked=group.enabled;check.setAttribute('aria-label',`采用 ${group.name} 文件夹`);check.addEventListener('change',()=>{group.enabled=check.checked;card.classList.toggle('disabled',!check.checked);renderOrganizerFooter();});
-      const name=el('input');name.value=group.name;name.maxLength=32;name.setAttribute('aria-label','建议文件夹名称');name.addEventListener('input',()=>{group.name=name.value;renderOrganizerFooter();});
-      const page=el('select');page.setAttribute('aria-label',`${group.name} 的目标桌面`);state.pages.forEach(item=>{const option=el('option','',item.name);option.value=item.id;page.append(option);});page.value=group.page;page.addEventListener('change',()=>group.page=page.value);head.append(check,el('span','organization-folder-icon','▦'),name,page);card.append(head);
+      const card=el('section',`organization-group${group.enabled?'':' disabled'}`),head=el('div','organization-group-head'),check=el('input');check.type='checkbox';check.checked=group.enabled;check.setAttribute('aria-label',`采用 ${group.name} 文件夹`);check.addEventListener('change',()=>{group.enabled=check.checked;card.classList.toggle('disabled',!check.checked);refreshOrganizationLayout();});
+      const name=el('input');name.value=group.name;name.maxLength=32;name.setAttribute('aria-label','建议文件夹名称');name.addEventListener('input',()=>{group.name=name.value;refreshOrganizationLayout();});
+      const page=el('select');page.setAttribute('aria-label',`${group.name} 的目标桌面`);state.pages.forEach(item=>{const option=el('option','',item.name);option.value=item.id;page.append(option);});page.value=group.page;page.addEventListener('change',()=>{group.page=page.value;refreshOrganizationLayout();});head.append(check,el('span','organization-folder-icon','▦'),name,page);card.append(head);
       card.append(el('p','organization-reason',group.reason||'根据网站名称与具体服务用途匹配。'));
       const members=el('div','organization-members');group.appIds.forEach(id=>{const app=appById(id);if(!app)return;const chip=el('span','organization-member');chip.append(appIcon(app,true),el('span','',app.name));const remove=organizerButton('×',()=>{group.appIds=group.appIds.filter(value=>value!==id);renderOrganizer();},'member-remove');remove.setAttribute('aria-label',`从建议中移除 ${app.name}`);chip.append(remove);members.append(chip);});card.append(members);root.append(card);
     });
-    const untouched=(selectedApps.size?[...selectedApps].map(appById):organizerApps()).filter(app=>app&&!used.has(app.id));if(untouched.length)root.append(el('p','settings-note',`${untouched.length} 个 App 保持原位：${untouched.map(app=>app.name).join('、')}`));
-    if(!groups.length)root.append(el('p','organizer-empty','没有找到适合合并的 App，可以切换到批量整理手动组合。'));
+    const untouched=(selectedApps.size?[...selectedApps].map(appById):organizerApps()).filter(app=>app&&!used.has(app.id));if(untouched.length)root.append(el('p','settings-note',`${untouched.length} 个 App 保留现有归属${$('#organizerLayout').checked?'，位置随布局整理调整':''}：${untouched.map(app=>app.name).join('、')}`));
+    if(!groups.length&&$('#organizerGrouping').checked)root.append(el('p','settings-note','没有适合合并的 App，仍可应用布局整理。'));
+  }
+  function refreshOrganizationLayout() {updateOrganizationDraft();const root=$('#organizationLayoutPreview');if(root)renderOrganizationLayout(root);renderOrganizerFooter();}
+  function renderOrganizationLayout(root) {
+    root.replaceChildren();const mode=organizerPlan.previewMode,result=organizerPlan.result,plan=result.modes[mode],arrange=$('#organizerLayout').checked;
+    const head=el('div','organization-layout-head'),copy=el('div');copy.append(el('strong','',arrange?'整理后的桌面':'分组后的桌面'),el('small','',`${result.stats.pages} 个桌面 · ${plan.screenCount} 屏${plan.beforeScreenCount>plan.screenCount?` · 少 ${plan.beforeScreenCount-plan.screenCount} 屏`:''}${arrange&&result.stats.resizedFolders?` · ${result.stats.resizedFolders} 个文件夹自动调节大小`:''}`));head.append(copy);
+    const tabs=el('div','organization-layout-tabs');tabs.setAttribute('aria-label','预览设备尺寸');[['desktop','桌面'],['tablet','平板'],['mobile','手机']].forEach(([value,label])=>{const button=organizerButton(label,()=>{organizerPlan.previewMode=value;renderOrganizationLayout(root);},value===mode?'active':'');button.setAttribute('aria-pressed',String(value===mode));tabs.append(button);});head.append(tabs);root.append(head);
+    const pages=el('div',`organization-layout-pages preview-${mode}`);pages.dataset.mode=mode;
+    plan.pages.forEach(page=>page.screens.forEach((screen,index)=>{
+      const card=el('figure','organization-layout-screen'),caption=el('figcaption','',`${page.name}${page.screens.length>1?` · 第 ${index+1} 屏`:''}`),canvas=el('div','organization-mini-canvas');canvas.dataset.page=page.id;canvas.dataset.segment=screen.segment;canvas.style.setProperty('--preview-columns',plan.profile.columns);canvas.style.setProperty('--preview-rows',plan.profile.rows);canvas.style.aspectRatio=`${plan.profile.width} / ${plan.profile.rows*(plan.profile.row+plan.profile.gap)-plan.profile.gap}`;
+      screen.tiles.forEach(tile=>{
+        const item=(tile.kind==='widget'?result.desktop.widgets:tile.kind==='folder'?result.desktop.folders:result.desktop.apps).find(item=>item.id===tile.id),name=tile.kind==='widget'?item.title||widgetLabel(item.type):item.name;
+        const node=el('div',`organization-mini-tile mini-${tile.kind}`);node.dataset.id=tile.id;node.dataset.x=tile.x;node.dataset.y=tile.y;node.style.gridColumn=`${tile.x+1} / span ${tile.w}`;node.style.gridRow=`${tile.row+1} / span ${tile.h}`;node.title=tile.kind==='folder'?`${name} · ${item.appIds.length} 个 App · ${tile.w}×${tile.h}`:name;
+        if(tile.kind==='app')node.append(appIcon(item,true));
+        else if(tile.kind==='folder'){const grid=el('div','organization-mini-folder');item.appIds.slice(0,6).forEach(id=>{const app=result.desktop.apps.find(app=>app.id===id);if(app)grid.append(appIcon(app,true));});node.append(grid);}
+        else node.append(el('span','organization-mini-symbol',widgetSymbol(item.type)));
+        node.append(el('span','organization-mini-name',name));canvas.append(node);
+      });card.append(caption,canvas,el('small','organization-screen-count',`${screen.tiles.filter(tile=>tile.kind==='app').length} App · ${screen.tiles.filter(tile=>tile.kind==='folder').length} 文件夹 · ${screen.tiles.filter(tile=>tile.kind==='widget').length} 小组件`));pages.append(card);
+    }));root.append(pages);
+    root.append(el('p','organization-layout-note',arrange?`${mode===layoutMode()?'按当前窗口预览':'按标准尺寸预览，实际窗口会自动适配'} · 小组件分区，收藏与最近使用优先 · 内容过多时横向分屏`:'仅合并文件夹，已有元素保留位置。'));
   }
   function applyAIOrganization() {
-    const proposed=organizerPlan?.groups.filter(group=>group.enabled),groups=validateGroups(proposed,state.apps);if(!groups.length)return toast('没有可应用的文件夹，至少需要两个 App');
-    applyOrganization(()=>{
-      const previous=new Set(state.folders.filter(folder=>folder.appIds.length).map(folder=>folder.id));
-      groups.forEach(group=>{
-        const page=proposed.find(item=>item.appIds.some(id=>group.appIds.includes(id)))?.page||viewPages[currentPage].pageId;
-        // Merge same-name suggestions into an existing folder instead of creating duplicates.
-        let folder=state.folders.find(item=>item.name===group.name&&item.page===page);
-        if(!folder){folder={id:crypto.randomUUID(),name:group.name,page,appIds:[],sizes:{}};state.folders.push(folder);}
-        group.appIds.forEach(id=>{removeFromFolders(id);folder.appIds.push(id);appById(id).page=page;clearAppLayout(id);});
-      });pruneEmptiedFolders(previous);
-    },`已整理为 ${groups.length} 组文件夹`);
+    if(!organizerPlan)return;
+    if(organizerPlan.signature!==JSON.stringify(organizationSnapshot())){organizerPlan.base=organizationBaseState();organizerPlan.signature=JSON.stringify(organizationSnapshot());renderOrganizer();return toast('桌面内容已变化，整理预览已更新');}
+    updateOrganizationDraft();const result=organizerPlan.result,arrange=$('#organizerLayout').checked;
+    if(!result.stats.groups&&!(arrange&&result.modes[layoutMode()].screenCount))return toast('没有可应用的整理');
+    applyOrganization(()=>{const {pages,apps,folders,layout}=result.desktop;Object.assign(state,clone({pages,apps,folders,layout}));},`${arrange?`已整理 ${result.stats.pages} 个桌面的布局`:`已整理为 ${result.stats.groups} 组文件夹`}`);
   }
   function openSettings(origin=null,tab='apps') {closeAppContext();if(folderId)closeFolder();if(widgetId)closeWidgetDetails();settingsTab=tab;renderSettings();openSurface('settings',origin);}
   function closeSettings() {closeSurface('settings');}
@@ -1458,6 +1473,8 @@ import {bingImageID,bingProxyURL} from './wallpaper-model.js';
   ['organizerScope','organizerExisting'].forEach(id=>$(`#${id}`).addEventListener('change',()=>{selectedApps.clear();organizerPlan=null;renderOrganizer();}));
   $('#organizerFilter').addEventListener('input',()=>{organizerPlan=null;renderOrganizer();});
   $('#organizerInstruction').addEventListener('input',()=>{if(organizerPlan){organizerPlan=null;renderOrganizer();}});
+  $('#organizerGrouping').addEventListener('change',()=>{organizerPlan=null;renderOrganizer();});
+  $('#organizerLayout').addEventListener('change',()=>{if(organizerPlan)refreshOrganizationLayout();else renderOrganizerFooter();});
   $('#settingsClose').addEventListener('click',closeSettings);
   $('#settingsBackdrop').addEventListener('click',closeSettings);
   $('#folderClose').addEventListener('click',()=>closeFolder());
@@ -1537,7 +1554,7 @@ import {bingImageID,bingProxyURL} from './wallpaper-model.js';
     if(sizingFolderId&&!event.target.closest('.folder-tile,.app-context-menu')){sizingFolderId=null;document.querySelectorAll('.folder-sizing').forEach(node=>node.classList.remove('folder-sizing'));}
   },true);
   document.addEventListener('contextmenu',event=>{if(event.defaultPrevented)return;if(event.target.closest('#desktopShell'))openDesktopContext(event);else closeAppContext();});
-  window.addEventListener('resize',()=>{cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{if(dragState||resizeState)return;renderPages();if(folderId)renderFolderContents();for(const context of surfaces.values())if(context.status!=='closing')openSurface(context.name,context.origin);});});
+  window.addEventListener('resize',()=>{cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{if(dragState||resizeState)return;renderPages();if(folderId)renderFolderContents();if(organizerPlan&&$('#organizerDialog').open)refreshOrganizationLayout();for(const context of surfaces.values())if(context.status!=='closing')openSurface(context.name,context.origin);});});
   const folderViewport=$('#folderViewport');
   folderViewport.addEventListener('pointerdown',event=>{if(event.button!==0||$('#editorDialog').open||dragState?.active||event.pointerType!=='touch'&&event.target.closest('.app-shortcut,button,a'))return;folderSwipe={id:event.pointerId,x:event.clientX,y:event.clientY,page:folderPage,lastX:event.clientX,at:performance.now(),velocity:0,active:false};},true);
   window.addEventListener('pointermove',event=>{const swipe=folderSwipe;if(!swipe||swipe.id!==event.pointerId)return;if(dragState?.active){folderSwipe=null;return;}const dx=event.clientX-swipe.x,dy=event.clientY-swipe.y;if(!swipe.active){if(Math.abs(dx)<8||Math.abs(dx)<Math.abs(dy)*1.2)return;swipe.active=true;if(dragState?.pointerId===event.pointerId){clearTimeout(dragState.timer);dragState=null;}try{folderViewport.setPointerCapture(event.pointerId);}catch{}$('#folderTrack').classList.add('folder-track-dragging');}
