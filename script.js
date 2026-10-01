@@ -184,8 +184,12 @@ import {planDesktopOrganization,desktopTileSize,resolveTilePositions} from './la
     const fallback=el('span','icon-fallback',fallbackText || app.name.slice(0,1) || '✦');icon.append(fallback);
     if(preview){const source=document.querySelector(`[data-id="${CSS.escape(app.id)}"] .has-favicon`);if(source){const snapshot=source.cloneNode(true);snapshot.classList.remove('app-icon','tiny-app-icon');snapshot.classList.add(tiny?'tiny-app-icon':'app-icon');return snapshot;}}
     const manual=app.iconMode==='custom';if(app.system||manual&&!validUrl(app.icon))return icon;
-    const paint=value=>{if(!value||icon.dataset.favicon===value.src)return;const image=new Image();image.alt='';image.draggable=false;image.decoding='async';image.referrerPolicy='no-referrer';image.src=value.src;icon.querySelector('img')?.remove();icon.append(image);icon.classList.add('has-favicon');icon.classList.toggle('auto-favicon',value.source==='website');icon.classList.toggle('generated-icon',value.source==='ai'||value.source==='local');icon.dataset.iconMode=value.source==='custom'?'custom':'auto';icon.dataset.iconSource=value.source;icon.dataset.favicon=value.src;icon.title=value.source==='ai'?'AI 生成的备用图标':value.source==='local'?'本地备用图标':'';if(tiny&&value.source==='website')icon.style.background='rgba(255,255,255,.92)';};
-    iconPainters.set(icon,paint);paint(icons.peek(app));
+    const paint=value=>{
+      if(!value||icon.dataset.favicon===value.src&&icon.dataset.iconSource===value.source)return;
+      if(icon.dataset.favicon!==value.src){const image=new Image();image.alt='';image.draggable=false;image.decoding='async';image.referrerPolicy='no-referrer';image.src=value.src;icon.querySelector('img')?.remove();icon.append(image);}
+      icon.classList.add('has-favicon');icon.classList.toggle('auto-favicon',value.source==='website');icon.classList.toggle('generated-icon',value.source==='ai'||value.source==='local');icon.dataset.iconMode=value.source==='custom'?'custom':'auto';icon.dataset.iconSource=value.source;icon.dataset.favicon=value.src;icon.title=value.source==='ai'?`${app.name} · AI 生成的备用图标`:value.source==='local'?`${app.name} · 本地备用图标`:'';if(tiny&&value.source==='website')icon.style.background='rgba(255,255,255,.92)';
+    };
+    iconPainters.set(icon,paint);paint(icons.peek(app)||(!manual?icons.fallback(app):null));
     if(!preview)requestAnimationFrame(()=>{if(!icon.isConnected)return;let retries=0;const resolve=()=>icons.resolve(app).then(value=>{if(!icon.isConnected)return;paint(value);if(value.retry&&retries++<6)setTimeout(()=>{if(icon.isConnected)resolve();},value.retry+1000);});if(tiny||!('IntersectionObserver' in window))resolve();else{const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){observer.disconnect();resolve();}},{rootMargin:'120px'});observer.observe(icon);}});
     return icon;
   }

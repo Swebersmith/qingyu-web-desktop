@@ -115,9 +115,11 @@ Worker 的云同步接口通过 `env.DB` 读写数据库。首次同步请求会
 
 网站不一定把 Logo 放在 `/favicon.ico`：部分使用 HTML 声明的 PNG / SVG / Apple 图标路径，部分限制外部访问，第三方缓存也可能缺失或在当前网络不可达。新版会补查公开网页中的图标声明，再尝试第三方缓存；成功结果在本机缓存，多个位置共享正在进行的请求。
 
-都失败时，`POST /api/icon` 使用同一个 **`AI`** 绑定与 Llama 模型，根据网站名称及域名选择语义图形、配色和名称角标，组合成清晰的 SVG 备用图标。这是独立的图标设计，来源标注为 AI；它不会声称恢复了官网 Logo。只发送名称和域名，URL 路径、查询参数、密码及片段不发送；私有地址用 `private-site` 替代域名。服务不可用时保留明确标注的本地备用设计。
+都失败时，`POST /api/icon` 使用同一个 **`AI`** 绑定与 Llama 模型，生成以网站专属字标为主体的 SVG 备用图标：中间放大显示 2～4 个字母或 1～2 个汉字，下方补充站名，右下角用简洁图形提示用途。常见网站结合准确域名采用各自的标识和配色，如 GitHub「GH」、GitLab「GL」、Gitee「码云」、ChatGPT「GPT」、B站「哔哩」，同一平台的音乐、视频、网盘等服务单独区分。陌生站点优先保留名称中的辨识词，或使用域名简称；AI 给出「网页」「工具」等通用标识或不相关的文字时，会替换为本机推导的站点标识。字标与底色保持清晰对比，页面加载及 AI 不可用时也先显示具有站点信息的本地备用图标。
 
-通过现有 **`DB`** 绑定可共享缓存 AI 设计，首次自动建立 `weboss_site_icons` 表，无需修改数据库 ID 或手动迁移。网站图标缓存 7 天、AI 设计缓存 30 天；图标缓存独立于桌面 JSON。右键「重新获取图标」或「生成 AI 备用图标」可主动更新。`ICON_AI_LIMITER` 在每个 Cloudflare 服务位置限制每分钟 12 次生成；达到限额时先显示本地图标，仍在页面中的图标稍后重试。`ICON_LOOKUP_LIMITER` 按 IP / Cloudflare 服务位置限制每分钟 60 次网页图标查询；两者都不是全局计数。静态预览不提供 Worker 的网页查询和 AI API，仍支持直接获取及本地备用图标。实现参考 [Llama 模型](https://developers.cloudflare.com/workers-ai/models/llama-3.3-70b-instruct-fp8-fast/) 和 [Workers AI JSON Mode](https://developers.cloudflare.com/workers-ai/features/json-mode/)。
+这是独立的备用设计，来源明确标注为 AI 或本地，不声称恢复了官网 Logo。AI 只接收名称、公开域名以及由这些信息推导的身份提示，不发送 URL 路径、查询参数、密码、历史或片段；私有地址用 `private-site` 替代域名，身份提示也不包含私有地址。
+
+通过现有 **`DB`** 绑定可共享缓存 AI 设计，首次自动建立 `weboss_site_icons` 表，无需修改数据库 ID 或手动迁移。网站图标缓存 7 天、AI 设计缓存 30 天；图标缓存独立于桌面 JSON。备用设计采用版本缓存，部署新版后旧 AI / 本地备用图标会自动重新获取，已成功获取的网站图标及手动图片继续使用原缓存。右键「重新获取图标」或「生成 AI 备用图标」可主动更新。`ICON_AI_LIMITER` 在每个 Cloudflare 服务位置限制每分钟 12 次生成；达到限额时先显示本地图标，仍在页面中的图标稍后重试。`ICON_LOOKUP_LIMITER` 按 IP / Cloudflare 服务位置限制每分钟 60 次网页图标查询；两者都不是全局计数。静态预览不提供 Worker 的网页查询和 AI API，仍支持直接获取及本地备用图标。实现参考 [Llama 模型](https://developers.cloudflare.com/workers-ai/models/llama-3.3-70b-instruct-fp8-fast/) 和 [Workers AI JSON Mode](https://developers.cloudflare.com/workers-ai/features/json-mode/)。
 
 ## 自定义
 

@@ -19,7 +19,7 @@ export function organizationSignals(app){
   const path=url.pathname.toLowerCase().split('/').filter(part=>semanticSegments.has(part)).slice(0,4).join('/');
   return {domain:url.hostname.toLowerCase(),path:path?'/'+path:''};
 }
-function purpose(app){
+export function appPurpose(app){
   const {domain,path}=organizationSignals(app),scores=[];
   for(const [name,hosts,pattern] of rules){
     const matches=hosts.split(' ').filter(host=>domain===host||domain.endsWith('.'+host));
@@ -40,7 +40,7 @@ export function suggestGroups(apps) {
   const groups = new Map();
   for (const app of apps) {
     if (app.system) continue;
-    const name = purpose(app);
+    const name = appPurpose(app);
     if (!name) continue;
     if (!groups.has(name)) groups.set(name, []);
     groups.get(name).push(app.id);
