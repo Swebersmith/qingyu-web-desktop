@@ -82,8 +82,8 @@
     <dialog class="folder-dialog morph-surface" id="folderDialog" aria-label="文件夹">
       <div class="folder-frame">
         <header class="folder-head"><div><p class="section-eyebrow">APP COLLECTION</p><h2 id="folderTitle" tabindex="-1"></h2><input id="folderName" hidden maxlength="32" aria-label="文件夹名称" /></div><button class="icon-button" id="folderClose" type="button" aria-label="关闭文件夹">×</button></header>
-        <div class="folder-hint"><span>拖动排序 · 拖出放回桌面</span><div><button class="chip-button" id="folderRename" type="button">重命名</button><button class="chip-button" id="folderBatch" type="button">多选</button><button class="chip-button" id="folderManage" type="button">添加 / 编辑</button></div></div>
-        <div class="folder-app-grid" id="folderGrid"></div>
+        <div class="folder-hint"><span>左右滑动 · 长按拖动</span><div><button class="chip-button" id="folderRename" type="button">重命名</button><button class="chip-button" id="folderBatch" type="button">多选</button><button class="chip-button" id="folderManage" type="button">添加 / 编辑</button></div></div>
+        <div class="folder-viewport" id="folderViewport" tabindex="0" aria-label="文件夹内的 App，可左右滑动或用方向键翻页"><div class="folder-page-track" id="folderTrack"><div class="folder-app-grid" id="folderGrid"></div></div></div>
         <nav class="folder-pagination" id="folderPagination" aria-label="文件夹分页"></nav>
       </div>
     </dialog>

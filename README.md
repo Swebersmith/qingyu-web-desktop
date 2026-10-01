@@ -137,6 +137,8 @@ Worker 的云同步接口通过 `env.DB` 读写数据库。首次同步请求会
 
 点击文件夹的标题、图标或空白处即可打开；大文件夹中可见的 App 仍然一键打开网站。打开后焦点停在标题，不会弹出改名输入框或手机键盘；点击「重命名」再编辑，Enter 或点到其他地方保存，Esc 取消当前改名。
 
+文件夹内部支持跟手横向滑动、松手吸附、分页圆点、鼠标滚轮与方向键；鼠标可以拖动空白处翻页，触屏长按 App 后仍可排序或拖出。翻页与重复开关复用 App 节点和图标。长名称最多显示两行，完整名称保留在链接提示和右键菜单中。设置窗口根据自身宽度调整布局，小窗口将每条快捷方式的操作按钮放在记录下方，保留完整的编辑和排序入口。
+
 ### 导入旧快捷方式
 
 在 **设置 → 数据 → 导入 JSON / 旧快捷方式** 选择文件，支持以下结构：
@@ -153,7 +155,7 @@ Worker 的云同步接口通过 `env.DB` 读写数据库。首次同步请求会
 
 天气由 [Open-Meteo](https://open-meteo.com/) 提供，无需 API Key；请求失败时显示不可用状态。迷你播放器使用浏览器 Web Audio 合成三段原创旋律，不会请求外部音乐文件。
 
-Bing 壁纸通过开源项目 [TimothyYe/bing-wallpaper](https://github.com/TimothyYe/bing-wallpaper) 的公开接口获取，图片与版权说明来自 Bing；可在外观设置中手动刷新。
+Bing 壁纸通过同源 `GET /api/wallpaper/bing` 获取元数据，Worker 依次尝试 Bing 官方的 `cn.bing.com` 与 `www.bing.com` 接口；图片通过同源 `/api/wallpaper/bing/image?id=...` 加载，浏览器无需连接原来的第三方域名或跨域获取 JSON。元数据缓存 30 分钟、固定图片缓存一天，失败时保留上一张；设置 → 外观可手动刷新。JSON 和云同步只保存官方图片地址、日期及版权，各设备根据自己的站点地址加载图片。图片接口仅接受 Bing 的固定图片 ID，拒绝任意网址、私有地址及非图片响应；`WALLPAPER_LIMITER` 按 IP / Cloudflare 服务位置限制每分钟 30 次请求。此功能无需新增数据库、AI 绑定或 API Key，本地 `npm run dev` 也使用同一代理。公开 Bing 接口没有可用性保证，站点自身须能在当前网络下访问。图片与版权来自 [Bing 官方壁纸接口](https://cn.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=zh-CN)，缓存方式参考 [Workers fetch 缓存](https://developers.cloudflare.com/workers/examples/cache-using-fetch/)。
 
 ## 来源与素材
 

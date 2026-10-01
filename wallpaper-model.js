@@ -1,0 +1,5 @@
+const bingHosts=new Set(['cn.bing.com','www.bing.com']);
+export function bingImageID(value){try{const url=new URL(value);if(url.protocol!=='https:'||url.username||url.password||url.port||!bingHosts.has(url.hostname)||url.pathname!=='/th')return null;const id=url.searchParams.get('id');return /^OHR\.[\w-]{1,180}_(?:1920x1080|1366x768|UHD)\.jpg$/.test(id||'')?id:null;}catch{return null;}}
+export const bingImageURL=id=>`https://cn.bing.com/th?id=${encodeURIComponent(id)}`;
+export function normalizeBingImage(data){const image=data?.images?.[0],id=bingImageID(new URL(image?.url||'', 'https://cn.bing.com').href);if(!id||!/^\d{8}$/.test(image?.startdate||''))throw Error('invalid_bing_image');const date=/^\d{8}$/.test(image.enddate||'')?image.enddate:image.startdate;return {url:bingImageURL(id),date:`${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}`,copyright:String(image.copyright||'Bing 每日一图').slice(0,200),title:String(image.title||'Bing 每日一图').slice(0,100)};}
+export function bingProxyURL(value,origin){const id=bingImageID(value);return id?`${origin}/api/wallpaper/bing/image?id=${encodeURIComponent(id)}`:null;}

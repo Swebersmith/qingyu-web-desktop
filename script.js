@@ -5,6 +5,8 @@ import {generateSyncKey,sameState} from './sync-model.js';
 import {importDesktop} from './desktop-import.js';
 import {normalizeProgress,progressSummary,monthGrid,weatherInfo} from './widget-model.js';
 import {IconStore} from './icon-client.js';
+import {loadDailyBing} from './wallpaper-client.js';
+import {bingImageID,bingProxyURL} from './wallpaper-model.js';
 
 (() => {
   'use strict';
@@ -117,8 +119,9 @@ import {IconStore} from './icon-client.js';
   let resizeState = null;
   let folderId = null;
   let folderPage = 0;
+  let folderSwipe = null,folderWheelAt=0;
   let widgetId = null,widgetMonth = new Date(new Date().getFullYear(),new Date().getMonth(),1);
-  let bingLoading = false;
+  let bingLoading = false,bingLoadedKey='',bingDisplayURL='';
   const surfaces = new Map();
   let dropSettling = false;
   let suppressClickUntil = 0;
@@ -286,7 +289,7 @@ import {IconStore} from './icon-client.js';
   }
   function setWallpaper() {
     const wall = $('#wallpaper');
-    if(state.wallpaper==='bing'&&!state.bingWallpaper?.url){loadBingWallpaper();return;}
+    if(state.wallpaper==='bing'){wall.title=state.bingWallpaper?.copyright||'Bing 每日一图';loadBingWallpaper();if(bingDisplayURL){wall.dataset.wallpaper='bing';wall.style.backgroundImage=`url(${JSON.stringify(bingDisplayURL)})`;}return;}
     wall.dataset.wallpaper = state.wallpaper;
     const url=state.wallpaper==='custom'?state.customWallpaper:state.wallpaper==='bing'?state.bingWallpaper?.url:'';
     wall.style.backgroundImage=url?`url(${JSON.stringify(url)})`:'';
@@ -295,17 +298,13 @@ import {IconStore} from './icon-client.js';
   }
   function localDay() { return new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); }
   async function loadBingWallpaper(force=false) {
-    if(bingLoading||state.wallpaper!=='bing'||(!force&&state.bingWallpaper?.date===localDay()))return;
-    bingLoading=true;const day=localDay(),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),7000);
-    const endpoint='https://bing.biturl.top/?resolution=1920&index=0&mkt=zh-CN';
+    const day=localDay();if(bingLoading||state.wallpaper!=='bing'||(!force&&bingLoadedKey===`${state.bingWallpaper?.url}:${day}`))return;
+    bingLoading=true;
     try{
-      let data;
-      try{const response=await fetch(`${endpoint}&format=json`,{signal:controller.signal});if(!response.ok)throw Error('Bing');data=await response.json();if(!validUrl(data.url))throw Error('image');}
-      catch{data={url:`${endpoint}&format=image&day=${day}`,copyright:'Bing 每日一图'};}
-      await new Promise((resolve,reject)=>{const image=new Image();const timeout=setTimeout(()=>reject(Error('image timeout')),8000);image.onload=()=>{clearTimeout(timeout);resolve();};image.onerror=()=>{clearTimeout(timeout);reject(Error('image'));};image.src=data.url;});
-      if(state.wallpaper==='bing'){state.bingWallpaper={url:validUrl(data.url),date:day,copyright:String(data.copyright||'Bing 每日一图').slice(0,200)};save();$('#wallpaper').dataset.wallpaper='bing';$('#wallpaper').style.backgroundImage=`url(${JSON.stringify(state.bingWallpaper.url)})`;$('#wallpaper').title=state.bingWallpaper.copyright;if($('#settingsDialog').open&&settingsTab==='appearance')renderSettings();}
-    }catch{toast('每日壁纸暂不可用，保留上一张壁纸');}
-    finally{clearTimeout(timer);bingLoading=false;}
+      const {value,src}=await loadDailyBing({cached:state.bingWallpaper,day,force});
+      if(state.wallpaper==='bing'){state.bingWallpaper=value;bingLoadedKey=value.date===day?`${value.url}:${day}`:'';bingDisplayURL=src;save();$('#wallpaper').dataset.wallpaper='bing';$('#wallpaper').style.backgroundImage=`url(${JSON.stringify(src)})`;$('#wallpaper').title=value.copyright;if($('#settingsDialog').open&&settingsTab==='appearance')renderSettings();}
+    }catch{if(!bingDisplayURL&&bingImageID(state.bingWallpaper?.url)){const image=new Image();image.onload=()=>{if(state.wallpaper==='bing'){bingDisplayURL=bingProxyURL(state.bingWallpaper.url,location.origin);$('#wallpaper').style.backgroundImage=`url(${JSON.stringify(bingDisplayURL)})`;$('#wallpaper').dataset.wallpaper='bing';}};image.src=bingProxyURL(state.bingWallpaper.url,location.origin);}toast('每日壁纸暂不可用，保留上一张壁纸');}
+    finally{bingLoading=false;}
   }
   function updateClock() {
     const date = new Date();
@@ -479,7 +478,7 @@ import {IconStore} from './icon-client.js';
   function renderApp(app, preview=false) {
     const wrap = el('div','app-shortcut'); wrap.dataset.id = app.id;
     const link = el('a'); link.href = app.url||'#'; if(!app.system)link.target = '_blank'; link.rel = 'noopener noreferrer'; link.setAttribute('aria-label',`打开 ${app.name}`);
-    link.draggable = false;
+    link.draggable = false;link.title=app.name;
     link.append(appIcon(app,false,preview),el('span','app-name',app.name));
     if(preview){wrap.append(link);return wrap;}
     link.addEventListener('click',event => {
@@ -592,19 +591,22 @@ import {IconStore} from './icon-client.js';
     closeAppContext();folderId=id;folderPage=0;$('#folderName').hidden=true;$('#folderTitle').hidden=false;renderFolderContents();
     openSurface('folder',origin||document.querySelector(`.desktop-canvas>.folder-tile[data-id="${CSS.escape(id)}"]`));
   }
-  function closeFolder(forDrag=false) {finishFolderRename();closeSurface('folder',()=>{folderId=null;},forDrag);}
+  function closeFolder(forDrag=false) {finishFolderRename();cancelFolderSwipe();closeSurface('folder',()=>{folderId=null;},forDrag);}
   function startFolderRename(){const folder=folderById(folderId);if(!folder)return;const input=$('#folderName');input.value=folder.name;$('#folderTitle').hidden=true;input.hidden=false;input.focus();input.select();}
   function finishFolderRename(cancel=false){const input=$('#folderName'),folder=folderById(folderId);if(input.hidden)return;input.hidden=true;$('#folderTitle').hidden=false;if(folder&&!cancel){const name=input.value.trim().slice(0,32);if(name&&name!==folder.name){folder.name=name;refreshDesktop();}}if(folder){input.value=folder.name;$('#folderTitle').textContent=folder.name;}}
   function renderFolderContents() {
     const folder=folderById(folderId);if(!folder)return;
     $('#folderTitle').textContent=folder.name;if($('#folderName').hidden)$('#folderName').value=folder.name;$('#folderDialog').dataset.id=folder.id;
-    const columns=innerWidth<=700?3:4,rows=Math.max(1,Math.min(3,Math.floor((surfaceTarget('folder').height-210+18)/86))),count=columns*rows,total=Math.max(1,Math.ceil(folder.appIds.length/count));folderPage=Math.min(folderPage,total-1);
-    const grid=$('#folderGrid'),next=[];grid.style.gridTemplateRows=`repeat(${rows},minmax(0,1fr))`;folder.appIds.slice(folderPage*count,(folderPage+1)*count).forEach(id=>{
+    const target=surfaceTarget('folder'),columns=target.width<=520?3:4,rows=Math.max(1,Math.min(3,Math.floor((target.height-220)/110))),count=columns*rows,total=Math.max(1,Math.ceil(folder.appIds.length/count)),track=$('#folderTrack');folderPage=Math.min(folderPage,total-1);
+    while(track.children.length>total)track.lastElementChild.remove();while(track.children.length<total)track.append(el('div','folder-app-grid'));
+    [...track.children].forEach((grid,index)=>{grid.style.gridTemplateColumns=`repeat(${columns},minmax(0,1fr))`;grid.style.gridTemplateRows=`repeat(${rows},minmax(0,1fr))`;const next=[];folder.appIds.slice(index*count,(index+1)*count).forEach(id=>{
       const app=appById(id);if(!app)return;const {page,...visual}=app,signature=JSON.stringify(visual);let cached=folderAppNodes.get(id);if(!cached||cached.signature!==signature){cached={signature,node:renderApp(app)};folderAppNodes.set(id,cached);}const node=cached.node;node.classList.add('folder-app');node.dataset.folder=folder.id;next.push(node);
-    });for(const node of [...grid.children])if(!next.includes(node))node.remove();next.forEach((node,index)=>{if(grid.children[index]!==node)grid.insertBefore(node,grid.children[index]||null);});for(const id of folderAppNodes.keys())if(!appById(id))folderAppNodes.delete(id);
-    if(!folder.appIds.length){const button=el('button','folder-empty-add','+ 添加 App');button.type='button';button.addEventListener('click',()=>openEditor('folder',folder.id));grid.append(button);}
-    const pages=$('#folderPagination');pages.replaceChildren();for(let index=0;index<total;index++){const button=el('button',index===folderPage?'active':'');button.type='button';button.setAttribute('aria-label',`文件夹第 ${index+1} 页`);button.addEventListener('click',()=>{folderPage=index;renderFolderContents();});pages.append(button);}
+    });for(const node of [...grid.children])if(!next.includes(node))node.remove();next.forEach((node,index)=>{if(grid.children[index]!==node)grid.insertBefore(node,grid.children[index]||null);});});for(const id of folderAppNodes.keys())if(!appById(id))folderAppNodes.delete(id);
+    const pages=$('#folderPagination');if(Number(pages.dataset.count)!==total){pages.replaceChildren();pages.dataset.count=total;for(let index=0;index<total;index++){const button=el('button');button.type='button';button.setAttribute('aria-label',`文件夹第 ${index+1} 页`);button.addEventListener('click',()=>setFolderPage(index));pages.append(button);}}
+    setFolderPage(folderPage,false);
   }
+  function setFolderPage(index,animate=true){const track=$('#folderTrack'),grids=[...track.children];folderPage=Math.max(0,Math.min(grids.length-1,index));track.classList.toggle('folder-track-dragging',!animate);track.style.transform=`translate3d(${-folderPage*100}%,0,0)`;grids.forEach((grid,i)=>{grid.id=i===folderPage?'folderGrid':'';grid.inert=i!==folderPage;grid.setAttribute('aria-hidden',String(i!==folderPage));});[...$('#folderPagination').children].forEach((button,i)=>{button.classList.toggle('active',i===folderPage);button.setAttribute('aria-current',String(i===folderPage));});if(!animate)requestAnimationFrame(()=>{if(!folderSwipe?.active)track.classList.remove('folder-track-dragging');});}
+  function cancelFolderSwipe(){if(folderSwipe){try{$('#folderViewport').releasePointerCapture(folderSwipe.id);}catch{}folderSwipe=null;setFolderPage(folderPage);}}
   function widgetLabel(type) { return ({clock:'此刻',weather:'今日天气',calendar:'本月日历',quote:'每日一句',todo:'今日计划',progress:'学习进度',recent:'最近访问',favorites:'收藏网站',watching:'继续观看',player:'迷你播放器',note:'便签',link:'快捷链接',quick:'快捷工具'})[type]||'Widget'; }
   function widgetSymbol(type) { return ({clock:'◷',weather:'☀',calendar:'▦',quote:'✿',todo:'✓',progress:'↗',recent:'↗',favorites:'♡',watching:'▶',player:'♫',note:'✎',link:'↗',quick:'⌘'})[type]||'✦'; }
   function openWidgetDetails(id,origin=null){
@@ -752,7 +754,7 @@ import {IconStore} from './icon-client.js';
         sourceRect:desktopNode?.getBoundingClientRect()||rect,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,
         offsetX:event.clientX-rect.left,offsetY:event.clientY-rect.top,width:rect.width,height:rect.height,active:false,touch:event.pointerType==='touch'};
       dragState.lastX=event.clientX;dragState.lastY=event.clientY;
-      if (dragState.touch && !editing) dragState.timer=setTimeout(()=>{
+      if (dragState.touch && (!editing||sourceFolder)) dragState.timer=setTimeout(()=>{
         if(type==='folder'){dragState=null;pointerStart=null;suppressClickUntil=Date.now()+700;armFolderResize(id);openItemContext(type,id,event.clientX,event.clientY);}
         else startTileDrag(dragState);
       },380);
@@ -970,7 +972,7 @@ import {IconStore} from './icon-client.js';
   }
   function surfaceTarget(name) {
     const width=Math.min(['settings','organizer'].includes(name)?880:name==='widget'?760:name==='folder'?620:650,innerWidth-24);
-    const height=Math.min(['settings','organizer','widget'].includes(name)?660:name==='folder'?500:480,innerHeight-(name==='search'?innerHeight-$('#searchTrigger').getBoundingClientRect().bottom+24:40));
+    const height=Math.min(['settings','organizer','widget'].includes(name)?660:name==='folder'?580:480,innerHeight-(name==='search'?innerHeight-$('#searchTrigger').getBoundingClientRect().bottom+24:40));
     return {left:(innerWidth-width)/2,top:name==='search'?$('#searchTrigger').getBoundingClientRect().bottom-height:(innerHeight-height)/2,width,height};
   }
   function geometry(rect,radius) { return {left:`${rect.left}px`,top:`${rect.top}px`,width:`${rect.width}px`,height:`${rect.height}px`,borderRadius:`${radius}px`}; }
@@ -1487,8 +1489,9 @@ import {IconStore} from './icon-client.js';
     if(event.key==='Escape'&&(dragState?.active||resizeState)){event.preventDefault();if(dragState)stopTileDrag({pointerId:dragState.pointerId},true);if(resizeState)finishFolderResize({pointerId:resizeState.pointerId},true);return;}
     if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'&&!$('#editorDialog').open){event.preventDefault();if($('#settingsDialog').open)closeSettings();if(folderId)closeFolder();if(widgetId)closeWidgetDetails();searchOpen();return;}
     if(event.key==='Escape'&&!$('#appContextMenu').hidden){closeAppContext();return;}
+    if(surfaces.has('folder')&&!$('#editorDialog').open&&event.target.closest('#folderDialog')&&!event.target.matches('input,textarea,select')&&['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();setFolderPage(folderPage+(event.key==='ArrowRight'?1:-1));return;}
     if(event.key==='Escape'&&!$('#editorDialog').open){if(surfaces.has('organizer'))closeOrganizer();else if(surfaces.has('search'))searchClose();else if(surfaces.has('settings'))closeSettings();else if(surfaces.has('widget'))closeWidgetDetails();else if(surfaces.has('folder'))closeFolder();else if(sizingFolderId){sizingFolderId=null;document.querySelectorAll('.folder-sizing').forEach(node=>node.classList.remove('folder-sizing'));}return;}
-    if(event.key==='Tab'&&surfaces.size&&!$('#editorDialog').open){const context=[...surfaces.values()].filter(item=>item.status!=='closing').at(-1);if(context){const focusable=[...context.panel.querySelectorAll('button,input,a,select,textarea')].filter(node=>!node.disabled&&node.getClientRects().length);const first=focusable[0],last=focusable.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}}
+    if(event.key==='Tab'&&surfaces.size&&!$('#editorDialog').open){const context=[...surfaces.values()].filter(item=>item.status!=='closing').at(-1);if(context){const focusable=[...context.panel.querySelectorAll('button,input,a,select,textarea')].filter(node=>!node.disabled&&!node.closest('[inert]')&&node.getClientRects().length);const first=focusable[0],last=focusable.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}}
     if(document.activeElement?.matches('input,textarea,select')||$('#editorDialog').open||surfaces.size)return;
     if(event.key==='ArrowRight')setPage(currentPage+1);if(event.key==='ArrowLeft')setPage(currentPage-1);
   });
@@ -1504,7 +1507,7 @@ import {IconStore} from './icon-client.js';
     const drag=dragState; if(!drag || drag.pointerId!==event.pointerId)return;
     const distance=Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY);
     if(drag.touch && distance>12 && !drag.active)clearTimeout(drag.timer);
-    if(!drag.active && distance>7 && (!drag.touch || editing))startTileDrag(drag);
+    if(!drag.active && distance>7 && (!drag.touch || editing&&!drag.sourceFolder))startTileDrag(drag);
     if(!drag.active)return;
     event.preventDefault(); drag.lastX=event.clientX;drag.lastY=event.clientY;
     drag.ghost.style.left=`${event.clientX-drag.offsetX}px`;drag.ghost.style.top=`${event.clientY-drag.offsetY}px`;
@@ -1535,9 +1538,15 @@ import {IconStore} from './icon-client.js';
   },true);
   document.addEventListener('contextmenu',event=>{if(event.defaultPrevented)return;if(event.target.closest('#desktopShell'))openDesktopContext(event);else closeAppContext();});
   window.addEventListener('resize',()=>{cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{if(dragState||resizeState)return;renderPages();if(folderId)renderFolderContents();for(const context of surfaces.values())if(context.status!=='closing')openSurface(context.name,context.origin);});});
-  let folderSwipe=null;
-  $('#folderGrid').addEventListener('pointerdown',event=>{if(event.pointerType==='touch')folderSwipe={x:event.clientX,y:event.clientY};});
-  $('#folderGrid').addEventListener('pointerup',event=>{if(!folderSwipe)return;const dx=event.clientX-folderSwipe.x,dy=event.clientY-folderSwipe.y;folderSwipe=null;if(dragState?.active)return;if(Math.abs(dx)>55&&Math.abs(dx)>Math.abs(dy)*1.2){folderPage=Math.max(0,folderPage+(dx<0?1:-1));suppressClickUntil=Date.now()+450;renderFolderContents();}});
+  const folderViewport=$('#folderViewport');
+  folderViewport.addEventListener('pointerdown',event=>{if(event.button!==0||$('#editorDialog').open||dragState?.active||event.pointerType!=='touch'&&event.target.closest('.app-shortcut,button,a'))return;folderSwipe={id:event.pointerId,x:event.clientX,y:event.clientY,page:folderPage,lastX:event.clientX,at:performance.now(),velocity:0,active:false};},true);
+  window.addEventListener('pointermove',event=>{const swipe=folderSwipe;if(!swipe||swipe.id!==event.pointerId)return;if(dragState?.active){folderSwipe=null;return;}const dx=event.clientX-swipe.x,dy=event.clientY-swipe.y;if(!swipe.active){if(Math.abs(dx)<8||Math.abs(dx)<Math.abs(dy)*1.2)return;swipe.active=true;if(dragState?.pointerId===event.pointerId){clearTimeout(dragState.timer);dragState=null;}try{folderViewport.setPointerCapture(event.pointerId);}catch{}$('#folderTrack').classList.add('folder-track-dragging');}
+    event.preventDefault();const now=performance.now();swipe.velocity=(event.clientX-swipe.lastX)/Math.max(1,now-swipe.at);swipe.lastX=event.clientX;swipe.at=now;const edge=swipe.page===0&&dx>0||swipe.page===$('#folderTrack').children.length-1&&dx<0,offset=Math.max(-folderViewport.clientWidth,Math.min(folderViewport.clientWidth,edge?dx*.2:dx));$('#folderTrack').style.transform=`translate3d(calc(${-swipe.page*100}% + ${offset}px),0,0)`;
+  },{capture:true,passive:false});
+  function finishFolderSwipe(event,cancelled=false){const swipe=folderSwipe;if(!swipe||swipe.id!==event.pointerId)return;const dx=event.clientX-swipe.x,flip=!cancelled&&swipe.active&&(Math.abs(dx)>Math.min(70,folderViewport.clientWidth*.2)||Math.abs(dx)>18&&performance.now()-swipe.at<100&&Math.abs(swipe.velocity)>.45);folderSwipe=null;if(swipe.active){suppressClickUntil=Date.now()+450;event.preventDefault();}try{folderViewport.releasePointerCapture(event.pointerId);}catch{}setFolderPage(swipe.page+(flip?(dx<0?1:-1):0));}
+  window.addEventListener('pointerup',event=>finishFolderSwipe(event),{capture:true,passive:false});window.addEventListener('pointercancel',event=>finishFolderSwipe(event,true),true);
+  folderViewport.addEventListener('wheel',event=>{if(dragState||folderSwipe?.active||$('#folderTrack').children.length<2)return;event.preventDefault();const delta=Math.abs(event.deltaX)>Math.abs(event.deltaY)?event.deltaX:event.deltaY;if(Math.abs(delta)<12||Date.now()-folderWheelAt<420)return;folderWheelAt=Date.now();setFolderPage(folderPage+(delta>0?1:-1));},{passive:false});
+  folderViewport.addEventListener('click',event=>{if(Date.now()<suppressClickUntil){event.preventDefault();event.stopPropagation();}},true);
   setInterval(()=>{if(state.wallpaper==='bing')loadBingWallpaper();},3600000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.wallpaper==='bing')loadBingWallpaper();});
 
