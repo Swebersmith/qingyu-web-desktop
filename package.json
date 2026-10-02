@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
-    "check": "node --check script.js && node --check config.js && node --check organizer.js && node --check layout-organizer.js && node --check desktop-model.js && node --check desktop-import.js && node --check widget-model.js && node --check icon-model.js && node --check icon-client.js && node --check icon-api.js && node --check wallpaper-model.js && node --check wallpaper-client.js && node --check wallpaper-api.js && node --check sync-model.js && node --check sync-client.js && node --check sync-api.js && node --check worker.js && node --check scripts/build.mjs && node --check scripts/serve.mjs",
+    "check": "node --check script.js && node --check config.js && node --check organizer.js && node --check layout-organizer.js && node --check desktop-model.js && node --check desktop-import.js && node --check widget-model.js && node --check icon-model.js && node --check icon-client.js && node --check icon-api.js && node --check wallpaper-model.js && node --check wallpaper-client.js && node --check wallpaper-api.js && node --check appearance-model.js && node --check appearance-client.js && node --check sync-model.js && node --check sync-client.js && node --check sync-api.js && node --check worker.js && node --check scripts/build.mjs && node --check scripts/serve.mjs",
     "test": "node --test tests/*.test.mjs",
     "dev:worker": "npm run build && wrangler dev",
     "deploy": "wrangler deploy",

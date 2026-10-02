@@ -8,6 +8,7 @@ import {IconStore} from './icon-client.js';
 import {loadDailyBing} from './wallpaper-client.js';
 import {bingImageID,bingProxyURL} from './wallpaper-model.js';
 import {planDesktopOrganization,desktopTileSize,resolveTilePositions} from './layout-organizer.js';
+import {WallpaperAppearance} from './appearance-client.js';
 
 (() => {
   'use strict';
@@ -16,6 +17,7 @@ import {planDesktopOrganization,desktopTileSize,resolveTilePositions} from './la
   const defaults = window.DEFAULT_DESKTOP_CONFIG;
   const $ = (selector, root = document) => root.querySelector(selector);
   const clone = value => JSON.parse(JSON.stringify(value));
+  const appearance=new WallpaperAppearance($('#wallpaper'),$('#desktopShell'));
   const icons=new IconStore(),folderAppNodes=new Map(),iconPainters=new WeakMap();
   let deleteConfirmation=null;
   const newDefaultAppIds = new Set(['x','telegram','baidu','douban','maps','taobao','mooc','coursera','arxiv','wikipedia','deepl','keep','qqmusic','twitch','doubanmovie','doubanmusic','bilibangumi','epic','stackoverflow','mdn','codepen','vercel','unsplash','tinypng']);
@@ -294,10 +296,11 @@ import {planDesktopOrganization,desktopTileSize,resolveTilePositions} from './la
   }
   function setWallpaper() {
     const wall = $('#wallpaper');
-    if(state.wallpaper==='bing'){wall.title=state.bingWallpaper?.copyright||'Bing 每日一图';loadBingWallpaper();if(bingDisplayURL){wall.dataset.wallpaper='bing';wall.style.backgroundImage=`url(${JSON.stringify(bingDisplayURL)})`;}return;}
+    if(state.wallpaper==='bing'){wall.title=state.bingWallpaper?.copyright||'Bing 每日一图';loadBingWallpaper();if(bingDisplayURL){wall.dataset.wallpaper='bing';wall.style.backgroundImage=`url(${JSON.stringify(bingDisplayURL)})`;appearance.setWallpaper('bing',bingDisplayURL);}else if(!wall.dataset.wallpaper)appearance.setWallpaper('sunny');return;}
     wall.dataset.wallpaper = state.wallpaper;
     const url=state.wallpaper==='custom'?state.customWallpaper:state.wallpaper==='bing'?state.bingWallpaper?.url:'';
     wall.style.backgroundImage=url?`url(${JSON.stringify(url)})`:'';
+    appearance.setWallpaper(state.wallpaper==='custom'&&!url?'sunny':state.wallpaper,url);
     wall.title=state.wallpaper==='bing'?(state.bingWallpaper?.copyright||'Bing 每日一图'):'';
     if(state.wallpaper==='bing')loadBingWallpaper();
   }
@@ -307,8 +310,8 @@ import {planDesktopOrganization,desktopTileSize,resolveTilePositions} from './la
     bingLoading=true;
     try{
       const {value,src}=await loadDailyBing({cached:state.bingWallpaper,day,force});
-      if(state.wallpaper==='bing'){state.bingWallpaper=value;bingLoadedKey=value.date===day?`${value.url}:${day}`:'';bingDisplayURL=src;save();$('#wallpaper').dataset.wallpaper='bing';$('#wallpaper').style.backgroundImage=`url(${JSON.stringify(src)})`;$('#wallpaper').title=value.copyright;if($('#settingsDialog').open&&settingsTab==='appearance')renderSettings();}
-    }catch{if(!bingDisplayURL&&bingImageID(state.bingWallpaper?.url)){const image=new Image();image.onload=()=>{if(state.wallpaper==='bing'){bingDisplayURL=bingProxyURL(state.bingWallpaper.url,location.origin);$('#wallpaper').style.backgroundImage=`url(${JSON.stringify(bingDisplayURL)})`;$('#wallpaper').dataset.wallpaper='bing';}};image.src=bingProxyURL(state.bingWallpaper.url,location.origin);}toast('每日壁纸暂不可用，保留上一张壁纸');}
+      if(state.wallpaper==='bing'){state.bingWallpaper=value;bingLoadedKey=value.date===day?`${value.url}:${day}`:'';bingDisplayURL=src;save();$('#wallpaper').dataset.wallpaper='bing';$('#wallpaper').style.backgroundImage=`url(${JSON.stringify(src)})`;$('#wallpaper').title=value.copyright;appearance.setWallpaper('bing',src);if($('#settingsDialog').open&&settingsTab==='appearance')renderSettings();}
+    }catch{if(!bingDisplayURL&&bingImageID(state.bingWallpaper?.url)){const image=new Image();image.onload=()=>{if(state.wallpaper==='bing'){bingDisplayURL=bingProxyURL(state.bingWallpaper.url,location.origin);$('#wallpaper').style.backgroundImage=`url(${JSON.stringify(bingDisplayURL)})`;$('#wallpaper').dataset.wallpaper='bing';appearance.setWallpaper('bing',bingDisplayURL);}};image.src=bingProxyURL(state.bingWallpaper.url,location.origin);}toast('每日壁纸暂不可用，保留上一张壁纸');}
     finally{bingLoading=false;}
   }
   function updateClock() {
@@ -446,6 +449,7 @@ import {planDesktopOrganization,desktopTileSize,resolveTilePositions} from './la
     if (!animate) { track.classList.add('dragging'); requestAnimationFrame(() => track.classList.remove('dragging')); }
     track.style.transform = `translate3d(${-currentPage*100}%,0,0)`;
     [...$('#pageDots').children].forEach((dot,i) => { dot.classList.toggle('active',i===currentPage); dot.setAttribute('aria-current',String(i===currentPage)); });
+    appearance.schedule(animate?480:70);
   }
   function renderApp(app, preview=false) {
     const wrap = el('div','app-shortcut'); wrap.dataset.id = app.id;
@@ -832,7 +836,7 @@ import {planDesktopOrganization,desktopTileSize,resolveTilePositions} from './la
     if (!drag || drag !== dragState || drag.active) return;
     try{drag.node.setPointerCapture(drag.pointerId);}catch{ /* Synthetic pointers may not have capture. */ }
     drag.active=true; clearTimeout(drag.timer); drag.node.classList.add('is-dragging');
-    const ghost=drag.node.cloneNode(true); ghost.removeAttribute('id'); ghost.querySelectorAll('[id]').forEach(child=>child.removeAttribute('id'));
+    const ghost=drag.node.cloneNode(true);appearance.copyAppearance(drag.node,ghost); ghost.removeAttribute('id'); ghost.querySelectorAll('[id]').forEach(child=>child.removeAttribute('id'));
     ghost.classList.add('drag-ghost'); ghost.classList.remove('is-dragging');
     ghost.style.width=`${drag.width}px`; ghost.style.height=`${drag.height}px`;
     ghost.style.left=`${drag.startX-drag.offsetX}px`; ghost.style.top=`${drag.startY-drag.offsetY}px`;
@@ -966,8 +970,8 @@ import {planDesktopOrganization,desktopTileSize,resolveTilePositions} from './la
       const owner=origin.closest('[data-id]'),area=owner?.classList.contains('dock-app')?'#dock':'.desktop-canvas';
       context={...nodes,name,origin,originRect:origin.getBoundingClientRect(),originSelector:owner?`${area} [data-id="${CSS.escape(owner.dataset.id)}"]${origin.classList.contains('app-icon')?' .app-icon':''}`:origin.id?`#${origin.id}`:null};surfaces.set(name,context);
       context.seed=el('div',`surface-seed ${name}-seed`);context.seed.setAttribute('aria-hidden','true');
-      if(name==='search')context.seed.append(el('span','search-glyph','⌕'),el('span','',state.searchLabel));
-      else if(name==='settings'||name==='widget'){const seed=origin.cloneNode(true);seed.removeAttribute('id');seed.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));seed.classList.remove('surface-origin-hidden');context.seed.append(seed);}
+      if(name==='search'){context.seed.append(el('span','search-glyph','⌕'),el('span','',state.searchLabel));appearance.copyAppearance(origin,context.seed);context.seed.style.borderRadius='inherit';}
+      else if(name==='settings'||name==='widget'){const seed=origin.cloneNode(true);appearance.copyAppearance(origin,seed);seed.removeAttribute('id');seed.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));seed.classList.remove('surface-origin-hidden');context.seed.append(seed);}
       else context.seed.append(el('span','folder-seed-icon','▦'));
       nodes.panel.append(context.seed);if(nodes.panel instanceof HTMLDialogElement)nodes.panel.show();
     }

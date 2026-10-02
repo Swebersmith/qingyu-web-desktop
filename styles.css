@@ -412,7 +412,7 @@ dialog{border:0;padding:0;max-width:none;max-height:none;color:var(--ink)}dialog
 .top-actions{gap:3px;padding:4px;border-radius:18px;border:1px solid rgba(255,255,255,.7);background:rgba(248,252,249,.58);backdrop-filter:blur(20px);box-shadow:0 5px 22px #37565b0d}
 .top-actions .top-tool{height:38px;padding:8px 12px;gap:7px;border:0;border-radius:13px;background:transparent;box-shadow:none;backdrop-filter:none;font-size:13px;font-weight:650;color:#385f67}
 .top-actions .top-tool:hover{background:rgba(255,255,255,.75);transform:none}.top-actions .top-tool.active{background:#d8ebe3;color:#34696c}
-.top-tool svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}.top-actions .cloud-sync-button:after{right:8px;bottom:5px;width:7px;height:7px}
+.top-tool svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}.top-actions .cloud-sync-button:after{right:auto;left:24px;bottom:6px;width:7px;height:7px}
 .top-context{font-size:14px;font-weight:600}.desktop-page{padding-top:12px}.draft-page-hint{position:absolute;top:15px;left:50%;transform:translateX(-50%);font-size:14px;color:#5d8a85;background:#eff9f0d9;padding:8px 15px;border-radius:12px;z-index:2;pointer-events:none}
 .desktop-canvas .app-name,.widget-detail-app-grid .app-name{font-size:13px;line-height:18px}.widget-label{font-size:13px;letter-spacing:.02em}.clock-date{font-size:14px}.clock-message{font-size:13px}
 .desktop-canvas .todo-item{font-size:14px;line-height:1.6;gap:9px}.desktop-canvas .todo-item input{width:17px;height:17px}.desktop-canvas .todo-list{gap:10px}
@@ -466,23 +466,29 @@ dialog{border:0;padding:0;max-width:none;max-height:none;color:var(--ink)}dialog
 .dock.dock-drop-ready{--dock-glass:rgba(248,255,252,.88);background:transparent}
 @media(pointer:coarse){.dock{--dock-glass:rgba(255,255,255,.76);--dock-blur:none}}
 
-/* Local contrast surfaces keep labels readable without dimming the wallpaper. */
-:root{--readable-ink:#233f47;--readable-muted:#425f67;--readable-glass:rgba(248,252,250,.86);--readable-label:rgba(248,252,250,.9)}
-.desktop-canvas>.app-shortcut>a>.app-name,.desktop-canvas>.folder-tile.compact>.app-name{padding-inline:5px;border-radius:6px;background:var(--readable-label);color:var(--readable-ink);text-shadow:none;box-shadow:0 1px 6px rgba(20,41,49,.1)}
-.top-context{position:relative;isolation:isolate;color:var(--readable-ink);text-shadow:none}
-.top-context::before{content:"";position:absolute;inset:-4px -7px;border-radius:8px;background:var(--readable-label);box-shadow:0 1px 6px rgba(20,41,49,.08);z-index:-1;pointer-events:none}
-.desktop-canvas>.widget-card,.desktop-canvas>.widget-card[data-type="clock"],.folder-tile:not(.compact){background:var(--readable-glass);color:var(--readable-ink)}
-.desktop-canvas>.widget-card :is(.widget-label,.widget-symbol,.clock-date,.clock-message,.weather-bottom,.calendar-week,.quote-foot,.progress-foot,.widget-empty,.note-content,.player-title small,.watch-card small){color:var(--readable-muted)}
-.desktop-canvas>.widget-card :is(.clock-big,.weather-degree,.calendar-month,.quote-body,.todo-item,.calendar-days,.recent-link,.favorite-link,.player-title strong,.quick-links a,.watch-card){color:var(--readable-ink);text-shadow:none}
+:root,[data-surface-tone="light"]{--surface-rgb:248 252 250;--surface-alpha:.46;--surface-ink:#19333e;--surface-muted:#2d4753;--surface-brightness:1.04;--surface-glint:rgba(255,255,255,.18);--surface-line:rgba(255,255,255,.7);--surface-control:rgba(255,255,255,.36)}
+.desktop-shell[data-wallpaper-tone="dark"],[data-surface-tone="dark"]{--surface-rgb:18 32 42;--surface-alpha:.34;--surface-ink:#f6fbff;--surface-muted:#e2edf2;--surface-brightness:.72;--surface-glint:rgba(255,255,255,.025);--surface-line:rgba(255,255,255,.32);--surface-control:rgba(255,255,255,.06)}
+/* Gaussian blur removes texture noise; the tint follows each surface's local light. */
+.desktop-canvas>.widget-card,.desktop-canvas>.widget-card[data-type="clock"],.folder-tile:not(.compact),.top-actions,.search-pill{background-color:rgb(var(--surface-rgb)/var(--surface-alpha));background-image:linear-gradient(135deg,var(--surface-glint),transparent 65%);backdrop-filter:blur(var(--surface-blur,26px)) saturate(1.1) brightness(var(--surface-brightness));-webkit-backdrop-filter:blur(var(--surface-blur,26px)) saturate(1.1) brightness(var(--surface-brightness));border-color:var(--surface-line);color:var(--surface-ink);box-shadow:inset 0 1px 0 rgba(255,255,255,.45),inset 0 -1px 0 rgba(255,255,255,.08),0 12px 34px rgba(21,42,51,.12)}
+/* Text halos follow the glyphs, without adding rectangular caption backgrounds. */
+:root,[data-label-tone="dark"]{--label-ink:#19333e;--label-halo:rgba(255,255,255,.88)}
+.desktop-shell[data-wallpaper-tone="dark"],[data-label-tone="light"]{--label-ink:#f6fbff;--label-halo:rgba(10,24,34,.86)}
+.desktop-canvas>.app-shortcut>a>.app-name,.desktop-canvas>.folder-tile.compact>.app-name,.top-context,[data-label-tone]{padding-inline:0;border-radius:0;background:transparent;color:var(--label-ink);box-shadow:none;text-shadow:0 1px 2px var(--label-halo),0 0 3px var(--label-halo);font-weight:700}
+.top-context::before{content:none}
+[data-label-detail="busy"]{text-shadow:0 1px 2px var(--label-halo),.75px 0 1px var(--label-halo),-.75px 0 1px var(--label-halo),0 -.75px 1px var(--label-halo),0 .75px 1px var(--label-halo),0 0 5px var(--label-halo)!important}
+.desktop-canvas>.widget-card :is(.widget-label,.widget-symbol,.clock-date,.clock-message,.weather-bottom,.calendar-week,.quote-foot,.progress-foot,.widget-empty,.note-content,.player-title small){color:var(--surface-muted)}
+.desktop-canvas>.widget-card :is(.clock-big,.weather-degree,.calendar-month,.quote-body,.todo-item,.calendar-days,.recent-link,.favorite-link,.player-title strong){color:var(--surface-ink);text-shadow:none}
 .desktop-canvas>.widget-card .calendar-days span.today{background:#a24b42}
-.desktop-canvas>.widget-card .todo-item.done span{opacity:1;color:var(--readable-muted)}
-.desktop-canvas>.widget-card .chip-button{color:var(--readable-muted)}
-.desktop-canvas>.widget-card .watch-card small{opacity:1;color:var(--readable-ink)}
+.desktop-canvas>.widget-card .todo-item.done span{opacity:1;color:var(--surface-muted)}
+.desktop-canvas>.widget-card :is(.chip-button,.quick-links a){background:var(--surface-control);color:var(--surface-ink);border-color:var(--surface-line)}
+.desktop-canvas>.widget-card .watch-card{color:#233f47}.desktop-canvas>.widget-card .watch-card small{opacity:1;color:#233f47}
 .quote-card .widget-head,.quote-card .widget-content{position:relative;z-index:1}
-.folder-tile-head,.folder-tile .app-name{color:var(--readable-ink);text-shadow:none}
-.folder-tile-head span,.folder-tile .folder-empty{color:var(--readable-muted)}
-.top-actions,.search-pill{background:var(--readable-glass)}
-.top-actions .top-tool,.search-pill{color:var(--readable-ink)}
-.search-pill :is(.search-glyph,kbd){color:var(--readable-muted)}
-@media(pointer:coarse){:root{--readable-glass:rgba(248,252,250,.94);--readable-label:rgba(248,252,250,.95)}}
+.quote-card[data-surface-tone="dark"]::after{color:rgba(236,145,126,.22)}
+.folder-tile-head,.folder-tile:not(.compact) .app-name{color:var(--surface-ink);text-shadow:none}
+.folder-tile-head span,.folder-tile .folder-empty{color:var(--surface-muted)}
+.top-actions .top-tool,.search-pill{color:var(--surface-ink)}.top-actions .top-tool:hover{background:var(--surface-control)}.top-actions .top-tool.active{background:#d8ebe3;color:#34696c}
+.search-pill :is(.search-glyph,kbd){color:var(--surface-ink)}.search-pill kbd{background:var(--surface-control)}
+@media(max-width:700px){.top-actions .cloud-sync-button:after{left:20px;bottom:5px;width:5px;height:5px;border-width:1.5px}}
+@media(pointer:coarse){.desktop-shell{--surface-blur:22px}.dock{--dock-glass:rgba(248,252,250,.5);--dock-blur:blur(22px) saturate(1.2)}}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.desktop-canvas>.widget-card,.folder-tile:not(.compact),.top-actions,.search-pill{--surface-alpha:.88!important}}
 @media(prefers-reduced-motion:reduce){.organization-layout-screen{animation:none}}
